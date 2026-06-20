@@ -18,8 +18,15 @@ import { formatRating } from "@/lib/ratings";
 import { readHighScore, writeHighScore } from "@/lib/storage";
 import type { CardSide, GameMode, Movie, MoviePair } from "@/lib/types";
 
+const ROUND_EXIT_DURATION_MS = 140;
+const ROUND_ENTER_DURATION_MS = 180;
+
+type RoundTransition = "idle" | "exiting" | "entering";
+
 export default function MovieGame() {
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const roundExitTimeoutRef = useRef<number | null>(null);
+  const roundEnterTimeoutRef = useRef<number | null>(null);
   const mode: GameMode = "classic";
   const [movies, setMovies] = useState<Movie[]>([]);
   const [pair, setPair] = useState<MoviePair | null>(null);
@@ -36,6 +43,7 @@ export default function MovieGame() {
   const [pendingCarryOverMovie, setPendingCarryOverMovie] = useState<Movie | null>(null);
   const [pendingCarryOverSide, setPendingCarryOverSide] = useState<CardSide | null>(null);
   const [persistedRevealMovieKey, setPersistedRevealMovieKey] = useState<string | null>(null);
+  const [roundTransition, setRoundTransition] = useState<RoundTransition>("idle");
 
   function getClassicPair(
     nextCarryOverMovie: Movie | null,
@@ -80,6 +88,14 @@ export default function MovieGame() {
       if (feedbackTimeoutRef.current !== null) {
         window.clearTimeout(feedbackTimeoutRef.current);
       }
+
+      if (roundExitTimeoutRef.current !== null) {
+        window.clearTimeout(roundExitTimeoutRef.current);
+      }
+
+      if (roundEnterTimeoutRef.current !== null) {
+        window.clearTimeout(roundEnterTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -96,7 +112,19 @@ export default function MovieGame() {
     setSelectedMovie(null);
   }
 
-  function startNextRound(nextScore: number) {
+  function clearRoundTransitionTimeouts() {
+    if (roundExitTimeoutRef.current !== null) {
+      window.clearTimeout(roundExitTimeoutRef.current);
+      roundExitTimeoutRef.current = null;
+    }
+
+    if (roundEnterTimeoutRef.current !== null) {
+      window.clearTimeout(roundEnterTimeoutRef.current);
+      roundEnterTimeoutRef.current = null;
+    }
+  }
+
+  function applyNextRound(nextScore: number) {
     const nextPair = getClassicPair(
       pendingCarryOverMovie,
       pendingCarryOverSide,
@@ -114,6 +142,27 @@ export default function MovieGame() {
     setPendingCarryOverMovie(null);
     setPendingCarryOverSide(null);
     resetFeedbackState();
+  }
+
+  function startNextRound(nextScore: number) {
+    if (roundTransition !== "idle") {
+      return;
+    }
+
+    clearRoundTransitionTimeouts();
+    setRoundTransition("exiting");
+
+    roundExitTimeoutRef.current = window.setTimeout(() => {
+      applyNextRound(nextScore);
+      setRoundTransition("entering");
+
+      roundEnterTimeoutRef.current = window.setTimeout(() => {
+        setRoundTransition("idle");
+        roundEnterTimeoutRef.current = null;
+      }, ROUND_ENTER_DURATION_MS);
+
+      roundExitTimeoutRef.current = null;
+    }, ROUND_EXIT_DURATION_MS);
   }
 
   function handlePick(selectedMovie: Movie) {
@@ -139,6 +188,7 @@ export default function MovieGame() {
       setPersistedRevealMovieKey(
         getMovieKey(nextCarryOverMovie.name, nextCarryOverMovie.year),
       );
+      setRoundTransition("idle");
       setFeedback("correct");
 
       return;
@@ -153,6 +203,7 @@ export default function MovieGame() {
 
   function handleRestart() {
     resetFeedbackState();
+    clearRoundTransitionTimeouts();
 
     const nextPair = getClassicPair(null, null, movies);
 
@@ -168,6 +219,7 @@ export default function MovieGame() {
     setPendingCarryOverMovie(null);
     setPendingCarryOverSide(null);
     setPersistedRevealMovieKey(null);
+    setRoundTransition("idle");
     setError(null);
   }
 
@@ -208,6 +260,13 @@ export default function MovieGame() {
     return getMovieKey(movie.name, movie.year) === persistedRevealMovieKey;
   }
 
+  const roundTransitionClassName =
+    roundTransition === "exiting"
+      ? "animate-round-exit"
+      : roundTransition === "entering"
+        ? "animate-round-enter"
+        : "";
+
   if (loading) {
     return (
       <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center text-slate-300">
@@ -230,23 +289,23 @@ export default function MovieGame() {
   }
 
   return (
-    <div className="space-y-5 sm:space-y-6">
-      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
-        <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+    <div className="space-y-4 sm:space-y-6">
+      <div className="space-y-2 rounded-[1.35rem] border border-white/10 bg-white/5 p-3 sm:rounded-2xl sm:p-4">
+        <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">
           Mode
         </p>
-        <div className="inline-flex rounded-full border border-amber-300/40 bg-amber-300/12 px-4 py-2 text-sm font-semibold text-amber-100">
+        <div className="inline-flex rounded-full border border-amber-300/40 bg-amber-300/12 px-3 py-1.5 text-sm font-semibold text-amber-100">
           {mode === "classic" ? "Classic" : mode}
         </div>
-        <p className="text-sm text-slate-300">
-          Higher-rated movies carry forward, but never for more than two rounds.
+        <p className="text-sm leading-5 text-slate-300">
+          Winning movies carry forward for one extra round.
         </p>
       </div>
 
       <ScoreBoard highScore={highScore} score={score} />
 
       {feedback === "correct" ? (
-        <div className="rounded-2xl border border-emerald-300/30 bg-emerald-400/12 px-4 py-3 text-center text-emerald-100 animate-success-pulse">
+        <div className="rounded-[1.35rem] border border-emerald-300/30 bg-emerald-400/12 px-4 py-3 text-center text-sm leading-5 text-emerald-100 animate-success-pulse sm:rounded-2xl sm:text-base">
           Correct. Score +1. Jose rated this matchup {formatRating(selectedMovieRating ?? 0)} vs{" "}
           {formatRating(
             pair.left.name === selectedMovie?.name &&
@@ -259,43 +318,43 @@ export default function MovieGame() {
       ) : null}
 
       {feedback === "wrong" && correctMovie ? (
-        <div className="rounded-2xl border border-rose-300/30 bg-rose-400/12 px-4 py-3 text-center text-rose-100 animate-failure-shake">
+        <div className="rounded-[1.35rem] border border-rose-300/30 bg-rose-400/12 px-4 py-3 text-center text-sm leading-5 text-rose-100 animate-failure-shake sm:rounded-2xl sm:text-base">
           Wrong. Jose rated <span className="font-semibold">{correctMovie.name}</span>{" "}
           higher, {formatRating(correctMovieRating ?? 0)} vs {formatRating(selectedMovieRating ?? 0)}.
         </div>
       ) : null}
 
       {gameOver ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-center sm:p-8">
-          <p className="text-sm font-medium uppercase tracking-[0.2em] text-amber-300/80">
+        <div className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5 text-center sm:rounded-3xl sm:p-8">
+          <p className="text-xs font-medium uppercase tracking-[0.18em] text-amber-300/80 sm:text-sm sm:tracking-[0.2em]">
             Game Over
           </p>
-          <h2 className="mt-3 text-3xl font-semibold text-white">
+          <h2 className="mt-3 text-2xl font-semibold text-white sm:text-3xl">
             Final score: {score}
           </h2>
-          <p className="mt-3 text-slate-300">
+          <p className="mt-3 text-sm leading-5 text-slate-300 sm:text-base">
             The higher-rated movie was revealed by your last pick. Run it back.
           </p>
           <button
             type="button"
             onClick={handleRestart}
-            className="mt-6 inline-flex items-center justify-center rounded-full bg-amber-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-200"
+            className="mt-5 inline-flex w-full items-center justify-center rounded-full bg-amber-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-amber-200 sm:mt-6 sm:w-auto"
           >
             Restart Game
           </button>
         </div>
       ) : null}
 
-      <div className="space-y-2 text-center sm:space-y-3">
-        <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">
+      <div className="space-y-1.5 text-center sm:space-y-3">
+        <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-slate-400 sm:text-sm sm:tracking-[0.2em]">
           Which Movie Did Jose Rate Higher?
         </p>
-        <p className="text-slate-300">
+        <p className="text-sm leading-5 text-slate-300 sm:text-base">
           Choose the movie Jose rated higher on Letterboxd.
         </p>
       </div>
 
-      <div className="grid gap-3 md:grid-cols-2 md:gap-4">
+      <div className={`grid gap-2.5 md:grid-cols-2 md:gap-4 ${roundTransitionClassName}`}>
         <MovieCard
           movie={pair.left}
           onSelect={handlePick}
@@ -317,7 +376,8 @@ export default function MovieGame() {
           <button
             type="button"
             onClick={() => startNextRound(score)}
-            className="inline-flex w-full items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 sm:w-auto"
+            className="inline-flex w-full items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-70 sm:w-auto"
+            disabled={roundTransition !== "idle"}
           >
             Next Round
           </button>

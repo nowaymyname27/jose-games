@@ -73,3 +73,35 @@ button {
 .animate-failure-shake {
   animation: failure-shake 0.45s ease;
 }
+
+@keyframes round-exit {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+
+@keyframes round-enter {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-round-exit {
+  animation: round-exit 0.14s ease forwards;
+}
+
+.animate-round-enter {
+  animation: round-enter 0.18s ease forwards;
+}
