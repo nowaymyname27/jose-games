@@ -1,12 +1,15 @@
 import Papa from "papaparse";
 
+import { getMovieKey } from "@/lib/movie-key";
 import type { Movie } from "@/lib/types";
+import type { PosterMap } from "@/lib/types";
 
 const CSV_SOURCES = [
   "/data/ratings.csv",
   "/data/letterboxd-ratings.csv",
   "/data/sample-letterboxd-ratings.csv",
 ];
+const POSTER_SOURCE = "/data/movie-posters.json";
 
 type CsvRow = {
   Name?: string;
@@ -42,7 +45,19 @@ function parseMovies(csvText: string): Movie[] {
     .filter((movie): movie is Movie => movie !== null);
 }
 
+async function loadPosterMap(): Promise<PosterMap> {
+  const response = await fetch(POSTER_SOURCE, { cache: "no-store" });
+
+  if (!response.ok) {
+    return {};
+  }
+
+  return (await response.json()) as PosterMap;
+}
+
 export async function loadMovies(): Promise<Movie[]> {
+  const posterMap = await loadPosterMap();
+
   for (const source of CSV_SOURCES) {
     const response = await fetch(source, { cache: "no-store" });
 
@@ -51,7 +66,14 @@ export async function loadMovies(): Promise<Movie[]> {
     }
 
     const csvText = await response.text();
-    const movies = parseMovies(csvText);
+    const movies = parseMovies(csvText).map((movie) => {
+      const poster = posterMap[getMovieKey(movie.name, movie.year)];
+
+      return {
+        ...movie,
+        posterUrl: poster?.posterUrl,
+      };
+    });
 
     if (movies.length > 0) {
       return movies;

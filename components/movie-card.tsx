@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 import type { Movie } from "@/lib/types";
 import { formatRating } from "@/lib/ratings";
 
@@ -35,6 +37,22 @@ export default function MovieCard({
       className={`group flex min-h-56 w-full flex-col justify-between rounded-3xl border p-6 text-left transition disabled:cursor-not-allowed disabled:opacity-70 ${variantClassName}`}
     >
       <div className="space-y-3">
+        <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80">
+          {movie.posterUrl ? (
+            <Image
+              src={movie.posterUrl}
+              alt={`${movie.name} poster`}
+              fill
+              sizes="(max-width: 768px) 100vw, 50vw"
+              className="object-cover"
+            />
+          ) : (
+            <div className="flex h-full items-center justify-center bg-linear-to-br from-slate-900 via-slate-800 to-slate-950 px-4 text-center text-sm font-medium uppercase tracking-[0.2em] text-slate-400">
+              No Poster
+            </div>
+          )}
+        </div>
+
         <p className="text-xs font-medium uppercase tracking-[0.24em] text-amber-300/80">
           {variant === "correct"
             ? "Correct"

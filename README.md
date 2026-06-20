@@ -24,7 +24,13 @@ npm run dev
 
 ## Letterboxd CSV Location
 
-Place your Letterboxd ratings export at:
+Place your Letterboxd ratings export at either of these paths:
+
+```text
+public/data/ratings.csv
+```
+
+or
 
 ```text
 public/data/letterboxd-ratings.csv
@@ -46,10 +52,35 @@ The CSV should include these columns:
 
 Rows with missing movie names or invalid ratings are ignored.
 
+## Poster Covers
+
+Poster covers are cached locally in:
+
+```text
+public/data/movie-posters.json
+```
+
+To refresh the poster cache:
+
+1. Add a TMDb API key to `.env.local`:
+
+```bash
+TMDB_API_KEY=your_key_here
+```
+
+2. Run:
+
+```bash
+npm run fetch-posters
+```
+
+The app uses the cached poster URLs at runtime, so gameplay does not depend on live TMDb API calls.
+
 ## Notes
 
 - The game only generates matchups between movies with different ratings.
 - High score is stored in `localStorage` in the browser.
+- Poster images are fetched from TMDb once and then stored in the local cache file.
 - No authentication, backend API, or database is included yet.
 
 ## Future Features
