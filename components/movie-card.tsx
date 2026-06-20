@@ -18,6 +18,15 @@ export default function MovieCard({
   variant = "default",
   revealRating = false,
 }: MovieCardProps) {
+  const statusLabel =
+    variant === "correct"
+      ? "Correct"
+      : variant === "wrong"
+        ? "Not Quite"
+        : variant === "missed"
+          ? "Higher Rated"
+          : "Pick Me";
+
   const variantClassName = {
     default:
       "border-white/10 bg-white/5 hover:border-amber-300/60 hover:bg-white/10",
@@ -34,16 +43,16 @@ export default function MovieCard({
       type="button"
       onClick={() => onSelect(movie)}
       disabled={disabled}
-      className={`group flex min-h-56 w-full flex-col justify-between rounded-3xl border p-6 text-left transition disabled:cursor-not-allowed disabled:opacity-70 ${variantClassName}`}
+      className={`group flex w-full gap-4 rounded-3xl border p-4 text-left transition disabled:cursor-not-allowed disabled:opacity-70 sm:p-5 md:min-h-56 md:flex-col md:justify-between md:p-6 ${variantClassName}`}
     >
-      <div className="space-y-3">
-        <div className="relative aspect-[2/3] overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80">
+      <div className="relative w-24 shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-slate-900/80 sm:w-28 md:w-full md:aspect-[2/3]">
+        <div className="relative aspect-[2/3] h-full w-full">
           {movie.posterUrl ? (
             <Image
               src={movie.posterUrl}
               alt={`${movie.name} poster`}
               fill
-              sizes="(max-width: 768px) 100vw, 50vw"
+              sizes="(max-width: 767px) 96px, (max-width: 1023px) 112px, 50vw"
               className="object-cover"
             />
           ) : (
@@ -52,32 +61,30 @@ export default function MovieCard({
             </div>
           )}
         </div>
-
-        <p className="text-xs font-medium uppercase tracking-[0.24em] text-amber-300/80">
-          {variant === "correct"
-            ? "Correct"
-            : variant === "wrong"
-              ? "Not Quite"
-              : variant === "missed"
-                ? "Higher Rated"
-                : "Pick Me"}
-        </p>
-        <h2 className="text-2xl font-semibold tracking-tight text-white sm:text-3xl">
-          {movie.name}
-        </h2>
-        <p className="text-sm text-slate-300">
-          {movie.year ?? "Unknown year"}
-        </p>
-        {revealRating ? (
-          <div className="inline-flex w-fit rounded-full border border-white/15 bg-slate-950/40 px-3 py-1 text-sm font-semibold text-slate-50">
-            Jose&apos;s rating: {formatRating(movie.rating)}
-          </div>
-        ) : null}
       </div>
 
-      <span className="mt-8 inline-flex items-center text-sm font-medium text-slate-200 transition group-hover:text-white">
-        {revealRating ? "Rating revealed" : "I rated this one higher"}
-      </span>
+      <div className="flex min-w-0 flex-1 flex-col justify-between gap-4 md:gap-6">
+        <div className="space-y-2 md:space-y-3">
+          <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-amber-300/80 sm:text-xs sm:tracking-[0.24em]">
+            {statusLabel}
+          </p>
+          <h2 className="text-lg font-semibold tracking-tight text-white sm:text-xl md:text-2xl lg:text-3xl">
+            {movie.name}
+          </h2>
+          <p className="text-sm text-slate-300">
+            {movie.year ?? "Unknown year"}
+          </p>
+          {revealRating ? (
+            <div className="inline-flex w-fit rounded-full border border-white/15 bg-slate-950/40 px-3 py-1 text-sm font-semibold text-slate-50">
+              Jose&apos;s rating: {formatRating(movie.rating)}
+            </div>
+          ) : null}
+        </div>
+
+        <span className="inline-flex items-center text-sm font-medium text-slate-200 transition group-hover:text-white">
+          {revealRating ? "Rating revealed" : "I rated this one higher"}
+        </span>
+      </div>
     </button>
   );
 }

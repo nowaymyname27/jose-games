@@ -187,7 +187,7 @@ export default function MovieGame() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-5 sm:space-y-6">
       <ScoreBoard highScore={highScore} score={score} />
 
       {feedback === "correct" ? (
@@ -211,7 +211,7 @@ export default function MovieGame() {
       ) : null}
 
       {gameOver ? (
-        <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+        <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-center sm:p-8">
           <p className="text-sm font-medium uppercase tracking-[0.2em] text-amber-300/80">
             Game Over
           </p>
@@ -231,7 +231,7 @@ export default function MovieGame() {
         </div>
       ) : null}
 
-      <div className="space-y-3 text-center">
+      <div className="space-y-2 text-center sm:space-y-3">
         <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">
           Which Movie Did I Rate Higher?
         </p>
@@ -240,7 +240,7 @@ export default function MovieGame() {
         </p>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-3 md:grid-cols-2 md:gap-4">
         <MovieCard
           movie={pair.left}
           onSelect={handlePick}
@@ -262,7 +262,7 @@ export default function MovieGame() {
           <button
             type="button"
             onClick={() => startNextRound(score)}
-            className="inline-flex items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200"
+            className="inline-flex w-full items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 sm:w-auto"
           >
             Next Matchup
           </button>
@@ -273,7 +273,7 @@ export default function MovieGame() {
         <button
           type="button"
           onClick={handleRestart}
-          className="inline-flex items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-medium text-slate-100 transition hover:border-white/30 hover:bg-white/8"
+          className="inline-flex w-full items-center justify-center rounded-full border border-white/15 px-5 py-3 text-sm font-medium text-slate-100 transition hover:border-white/30 hover:bg-white/8 sm:w-auto"
         >
           Restart Round
         </button>
