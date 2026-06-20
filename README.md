@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Jose Games
 
-## Getting Started
+## Project Purpose
 
-First, run the development server:
+Jose Games is a personal mini-game collection built with Next.js. The first game is `Which Movie Did I Rate Higher?`, where the player picks which of two movies Jose rated higher on Letterboxd.
+
+The app currently uses a local CSV file as its data source so it stays simple and easy to extend.
+
+## Run Locally
+
+1. Install dependencies:
+
+```bash
+npm install
+```
+
+2. Start the development server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+3. Open `http://localhost:3000` in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Letterboxd CSV Location
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Place your Letterboxd ratings export at:
 
-## Learn More
+```text
+public/data/letterboxd-ratings.csv
+```
 
-To learn more about Next.js, take a look at the following resources:
+If that file is missing, the app falls back to the included sample file:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```text
+public/data/sample-letterboxd-ratings.csv
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Expected CSV Fields
 
-## Deploy on Vercel
+The CSV should include these columns:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `Name`
+- `Year`
+- `Rating`
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+Rows with missing movie names or invalid ratings are ignored.
+
+## Notes
+
+- The game only generates matchups between movies with different ratings.
+- High score is stored in `localStorage` in the browser.
+- No authentication, backend API, or database is included yet.
+
+## Future Features
+
+- More Jose Games mini-games using the same movie dataset
+- Filters by decade, genre, or rating band
+- Streak tracking and summary stats
+- Reveal screens with exact ratings after each wrong guess
+- Better CSV validation and import feedback
