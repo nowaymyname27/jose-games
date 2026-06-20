@@ -82,7 +82,7 @@ export default function MovieCard({
         </div>
 
         <span className="inline-flex items-center text-sm font-medium text-slate-200 transition group-hover:text-white">
-          {revealRating ? "Rating revealed" : "I rated this one higher"}
+          {revealRating ? "Rating revealed" : "Choose this movie"}
         </span>
       </div>
     </button>

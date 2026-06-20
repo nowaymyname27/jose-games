@@ -9,7 +9,7 @@ export default function Home() {
         </p>
         <div className="space-y-3">
           <h1 className="text-3xl font-semibold tracking-tight text-white sm:text-5xl">
-            Which Movie Did I Rate Higher?
+            Which Movie Did Jose Rate Higher?
           </h1>
           <p className="max-w-2xl text-sm text-slate-300 sm:text-lg">
             A fast movie guessing game powered by Jose&apos;s Letterboxd ratings.

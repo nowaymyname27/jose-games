@@ -233,10 +233,10 @@ export default function MovieGame() {
 
       <div className="space-y-2 text-center sm:space-y-3">
         <p className="text-sm font-medium uppercase tracking-[0.2em] text-slate-400">
-          Which Movie Did I Rate Higher?
+          Which Movie Did Jose Rate Higher?
         </p>
         <p className="text-slate-300">
-          Tap the movie you think Jose rated higher on Letterboxd.
+          Choose the movie Jose rated higher on Letterboxd.
         </p>
       </div>
 
