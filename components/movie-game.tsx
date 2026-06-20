@@ -5,13 +5,22 @@ import { useEffect, useRef, useState } from "react";
 import MovieCard from "@/components/movie-card";
 import ScoreBoard from "@/components/score-board";
 import { loadMovies } from "@/lib/csv";
-import { getRandomPair, isCorrectGuess } from "@/lib/game";
+import {
+  getHigherRatedMovie,
+  getMovieSide,
+  getNextClassicCarryOver,
+  getPairWithCarryOver,
+  getRandomPair,
+  isCorrectGuess,
+} from "@/lib/game";
+import { getMovieKey } from "@/lib/movie-key";
 import { formatRating } from "@/lib/ratings";
 import { readHighScore, writeHighScore } from "@/lib/storage";
-import type { Movie, MoviePair } from "@/lib/types";
+import type { CardSide, GameMode, Movie, MoviePair } from "@/lib/types";
 
 export default function MovieGame() {
   const feedbackTimeoutRef = useRef<number | null>(null);
+  const mode: GameMode = "classic";
   const [movies, setMovies] = useState<Movie[]>([]);
   const [pair, setPair] = useState<MoviePair | null>(null);
   const [score, setScore] = useState(0);
@@ -23,6 +32,20 @@ export default function MovieGame() {
     "idle",
   );
   const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [carryOverMovie, setCarryOverMovie] = useState<Movie | null>(null);
+  const [pendingCarryOverMovie, setPendingCarryOverMovie] = useState<Movie | null>(null);
+  const [pendingCarryOverSide, setPendingCarryOverSide] = useState<CardSide | null>(null);
+  const [persistedRevealMovieKey, setPersistedRevealMovieKey] = useState<string | null>(null);
+
+  function getClassicPair(
+    nextCarryOverMovie: Movie | null,
+    nextCarryOverSide: CardSide | null,
+    moviePool: Movie[],
+  ) {
+    return nextCarryOverMovie && nextCarryOverSide
+      ? getPairWithCarryOver(moviePool, nextCarryOverMovie, nextCarryOverSide)
+      : getRandomPair(moviePool);
+  }
 
   useEffect(() => {
     async function initializeGame() {
@@ -34,7 +57,7 @@ export default function MovieGame() {
           return;
         }
 
-        const nextPair = getRandomPair(loadedMovies);
+        const nextPair = getClassicPair(null, null, loadedMovies);
 
         if (!nextPair) {
           setError("Your CSV needs at least two movies with different ratings.");
@@ -73,14 +96,12 @@ export default function MovieGame() {
     setSelectedMovie(null);
   }
 
-  function getCorrectMovie(currentPair: MoviePair): Movie {
-    return currentPair.left.rating > currentPair.right.rating
-      ? currentPair.left
-      : currentPair.right;
-  }
-
   function startNextRound(nextScore: number) {
-    const nextPair = getRandomPair(movies);
+    const nextPair = getClassicPair(
+      pendingCarryOverMovie,
+      pendingCarryOverSide,
+      movies,
+    );
 
     if (!nextPair) {
       setGameOver(true);
@@ -89,6 +110,9 @@ export default function MovieGame() {
 
     setScore(nextScore);
     setPair(nextPair);
+    setCarryOverMovie(pendingCarryOverMovie);
+    setPendingCarryOverMovie(null);
+    setPendingCarryOverSide(null);
     resetFeedbackState();
   }
 
@@ -101,6 +125,8 @@ export default function MovieGame() {
 
     if (isCorrectGuess(pair, selectedMovie)) {
       const nextScore = score + 1;
+      const nextCarryOverMovie = getNextClassicCarryOver(pair, carryOverMovie);
+      const nextCarryOverSide = getMovieSide(pair, nextCarryOverMovie);
 
       if (nextScore > highScore) {
         setHighScore(nextScore);
@@ -108,6 +134,11 @@ export default function MovieGame() {
       }
 
       setScore(nextScore);
+      setPendingCarryOverMovie(nextCarryOverMovie);
+      setPendingCarryOverSide(nextCarryOverSide);
+      setPersistedRevealMovieKey(
+        getMovieKey(nextCarryOverMovie.name, nextCarryOverMovie.year),
+      );
       setFeedback("correct");
 
       return;
@@ -123,7 +154,7 @@ export default function MovieGame() {
   function handleRestart() {
     resetFeedbackState();
 
-    const nextPair = getRandomPair(movies);
+    const nextPair = getClassicPair(null, null, movies);
 
     if (!nextPair) {
       setError("Your CSV needs at least two movies with different ratings.");
@@ -133,10 +164,14 @@ export default function MovieGame() {
     setScore(0);
     setGameOver(false);
     setPair(nextPair);
+    setCarryOverMovie(null);
+    setPendingCarryOverMovie(null);
+    setPendingCarryOverSide(null);
+    setPersistedRevealMovieKey(null);
     setError(null);
   }
 
-  const correctMovie = pair ? getCorrectMovie(pair) : null;
+  const correctMovie = pair ? getHigherRatedMovie(pair) : null;
   const selectedMovieRating = selectedMovie?.rating;
   const correctMovieRating = correctMovie?.rating;
 
@@ -165,6 +200,14 @@ export default function MovieGame() {
     return "default";
   }
 
+  function shouldRevealRating(movie: Movie): boolean {
+    if (feedback !== "idle") {
+      return true;
+    }
+
+    return getMovieKey(movie.name, movie.year) === persistedRevealMovieKey;
+  }
+
   if (loading) {
     return (
       <div className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center text-slate-300">
@@ -188,6 +231,18 @@ export default function MovieGame() {
 
   return (
     <div className="space-y-5 sm:space-y-6">
+      <div className="space-y-2 rounded-2xl border border-white/10 bg-white/5 p-3 sm:p-4">
+        <p className="text-xs font-medium uppercase tracking-[0.2em] text-slate-400">
+          Mode
+        </p>
+        <div className="inline-flex rounded-full border border-amber-300/40 bg-amber-300/12 px-4 py-2 text-sm font-semibold text-amber-100">
+          {mode === "classic" ? "Classic" : mode}
+        </div>
+        <p className="text-sm text-slate-300">
+          Higher-rated movies carry forward, but never for more than two rounds.
+        </p>
+      </div>
+
       <ScoreBoard highScore={highScore} score={score} />
 
       {feedback === "correct" ? (
@@ -246,14 +301,14 @@ export default function MovieGame() {
           onSelect={handlePick}
           disabled={gameOver || feedback !== "idle"}
           variant={getCardVariant(pair.left)}
-          revealRating={feedback !== "idle"}
+          revealRating={shouldRevealRating(pair.left)}
         />
         <MovieCard
           movie={pair.right}
           onSelect={handlePick}
           disabled={gameOver || feedback !== "idle"}
           variant={getCardVariant(pair.right)}
-          revealRating={feedback !== "idle"}
+          revealRating={shouldRevealRating(pair.right)}
         />
       </div>
 
@@ -264,7 +319,7 @@ export default function MovieGame() {
             onClick={() => startNextRound(score)}
             className="inline-flex w-full items-center justify-center rounded-full bg-emerald-300 px-5 py-3 text-sm font-semibold text-slate-950 transition hover:bg-emerald-200 sm:w-auto"
           >
-            Next Matchup
+            Next Round
           </button>
         </div>
       ) : null}

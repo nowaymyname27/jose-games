@@ -5,6 +5,10 @@ export type Movie = {
   posterUrl?: string;
 };
 
+export type GameMode = "classic";
+
+export type CardSide = "left" | "right";
+
 export type MoviePair = {
   left: Movie;
   right: Movie;
