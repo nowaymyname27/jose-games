@@ -11,9 +11,6 @@ export default function Home() {
           <h1 className="text-2xl font-semibold tracking-tight text-white sm:text-5xl">
             Which Movie Did Jose Rate Higher?
           </h1>
-          <p className="mx-auto max-w-xl text-sm leading-5 text-slate-300 sm:mx-0 sm:max-w-2xl sm:text-lg">
-            A fast movie guessing game powered by Jose&apos;s Letterboxd ratings.
-          </p>
         </div>
       </div>
 

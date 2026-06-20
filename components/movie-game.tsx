@@ -8,27 +8,19 @@ import { loadMovies } from "@/lib/csv";
 import {
   getCorrectChoice,
   getHigherRatedMovie,
-  getMovieSide,
-  getNextCarryOverMovie,
-  getPairWithCarryOver,
   getRandomPair,
   isCorrectGuess,
 } from "@/lib/game";
 import { getMovieKey } from "@/lib/movie-key";
 import { formatRating } from "@/lib/ratings";
 import { readHighScore, writeHighScore } from "@/lib/storage";
-import type {
-  CardSide,
-  GameMode,
-  GuessChoice,
-  Movie,
-  MoviePair,
-} from "@/lib/types";
+import type { GameMode, GuessChoice, Movie, MoviePair } from "@/lib/types";
 
 const ROUND_EXIT_DURATION_MS = 140;
 const ROUND_ENTER_DURATION_MS = 180;
 
 type RoundTransition = "idle" | "exiting" | "entering";
+type RoundEndReason = "wrong" | "exhausted" | null;
 
 function getModeRules(mode: GameMode) {
   return mode === "classic"
@@ -59,28 +51,20 @@ export default function MovieGame() {
     "idle",
   );
   const [selectedChoice, setSelectedChoice] = useState<GuessChoice | null>(null);
-  const [carryOverMovie, setCarryOverMovie] = useState<Movie | null>(null);
-  const [pendingCarryOverMovie, setPendingCarryOverMovie] = useState<Movie | null>(null);
-  const [pendingCarryOverSide, setPendingCarryOverSide] = useState<CardSide | null>(null);
-  const [persistedRevealMovieKey, setPersistedRevealMovieKey] = useState<string | null>(null);
+  const [usedMovieKeys, setUsedMovieKeys] = useState<string[]>([]);
   const [roundTransition, setRoundTransition] = useState<RoundTransition>("idle");
+  const [roundEndReason, setRoundEndReason] = useState<RoundEndReason>(null);
 
   function getPairForMode(
     gameMode: GameMode,
-    nextCarryOverMovie: Movie | null,
-    nextCarryOverSide: CardSide | null,
     moviePool: Movie[],
+    currentUsedMovieKeys: string[],
   ) {
-    const rules = getModeRules(gameMode);
-
-    return nextCarryOverMovie && nextCarryOverSide
-      ? getPairWithCarryOver(
-          moviePool,
-          nextCarryOverMovie,
-          nextCarryOverSide,
-          rules,
-        )
-      : getRandomPair(moviePool, rules);
+    return getRandomPair(
+      moviePool,
+      getModeRules(gameMode),
+      new Set(currentUsedMovieKeys),
+    );
   }
 
   useEffect(() => {
@@ -93,7 +77,7 @@ export default function MovieGame() {
           return;
         }
 
-        const nextPair = getPairForMode("classic", null, null, loadedMovies);
+        const nextPair = getPairForMode("classic", loadedMovies, []);
 
         if (!nextPair) {
           setError("Your CSV needs more valid rating combinations to start playing.");
@@ -152,8 +136,15 @@ export default function MovieGame() {
     setSelectedChoice(null);
   }
 
+  function getCurrentPairKeys(currentPair: MoviePair): string[] {
+    return [
+      getMovieKey(currentPair.left.name, currentPair.left.year),
+      getMovieKey(currentPair.right.name, currentPair.right.year),
+    ];
+  }
+
   function applyFreshRound(gameMode: GameMode, nextScore: number) {
-    const nextPair = getPairForMode(gameMode, null, null, movies);
+    const nextPair = getPairForMode(gameMode, movies, []);
 
     if (!nextPair) {
       setError("This mode needs more valid rating combinations from the CSV.");
@@ -164,33 +155,33 @@ export default function MovieGame() {
     setScore(nextScore);
     setGameOver(false);
     setPair(nextPair);
-    setCarryOverMovie(null);
-    setPendingCarryOverMovie(null);
-    setPendingCarryOverSide(null);
-    setPersistedRevealMovieKey(null);
+    setUsedMovieKeys([]);
+    setRoundEndReason(null);
     setRoundTransition("idle");
     resetFeedbackState();
     setError(null);
   }
 
   function applyNextRound(nextScore: number) {
-    const nextPair = getPairForMode(
-      mode,
-      pendingCarryOverMovie,
-      pendingCarryOverSide,
-      movies,
-    );
+    if (!pair) {
+      return;
+    }
+
+    const nextUsedMovieKeys = [...usedMovieKeys, ...getCurrentPairKeys(pair)];
+    const nextPair = getPairForMode(mode, movies, nextUsedMovieKeys);
 
     if (!nextPair) {
+      setScore(nextScore);
+      setUsedMovieKeys(nextUsedMovieKeys);
       setGameOver(true);
+      setRoundEndReason("exhausted");
+      resetFeedbackState();
       return;
     }
 
     setScore(nextScore);
     setPair(nextPair);
-    setCarryOverMovie(pendingCarryOverMovie);
-    setPendingCarryOverMovie(null);
-    setPendingCarryOverSide(null);
+    setUsedMovieKeys(nextUsedMovieKeys);
     resetFeedbackState();
   }
 
@@ -224,8 +215,6 @@ export default function MovieGame() {
 
     if (isCorrectGuess(pair, guessChoice)) {
       const nextScore = score + 1;
-      const nextCarryOverMovie = getNextCarryOverMovie(pair, carryOverMovie);
-      const nextCarryOverSide = getMovieSide(pair, nextCarryOverMovie);
 
       if (nextScore > highScore) {
         setHighScore(nextScore);
@@ -233,17 +222,14 @@ export default function MovieGame() {
       }
 
       setScore(nextScore);
-      setPendingCarryOverMovie(nextCarryOverMovie);
-      setPendingCarryOverSide(nextCarryOverSide);
-      setPersistedRevealMovieKey(
-        getMovieKey(nextCarryOverMovie.name, nextCarryOverMovie.year),
-      );
+      setRoundEndReason(null);
       setRoundTransition("idle");
       setFeedback("correct");
       return;
     }
 
     setFeedback("wrong");
+    setRoundEndReason("wrong");
     feedbackTimeoutRef.current = window.setTimeout(() => {
       setGameOver(true);
       clearFeedbackTimeout();
@@ -300,12 +286,8 @@ export default function MovieGame() {
     return isCorrect ? "missed" : "default";
   }
 
-  function shouldRevealRating(movie: Movie): boolean {
-    if (feedback !== "idle") {
-      return true;
-    }
-
-    return getMovieKey(movie.name, movie.year) === persistedRevealMovieKey;
+  function shouldRevealRating(): boolean {
+    return feedback !== "idle";
   }
 
   function getFeedbackMessage() {
@@ -399,8 +381,8 @@ export default function MovieGame() {
 
         <p className="text-sm leading-5 text-slate-300">
           {mode === "classic"
-            ? "Winning movies carry forward for one extra round."
-            : "Movies stay within one star, and equal ratings can be guessed."}
+            ? "Different ratings only, with no repeated movies in a run."
+            : "Movies stay within one star, same ratings can be guessed, and no movies repeat in a run."}
         </p>
       </div>
 
@@ -427,7 +409,9 @@ export default function MovieGame() {
             Final score: {score}
           </h2>
           <p className="mt-3 text-sm leading-5 text-slate-300 sm:text-base">
-            The ratings were revealed by the last pick. Run it back.
+            {roundEndReason === "exhausted"
+              ? "No more valid matchups are left in this run. Restart to play again."
+              : "The ratings were revealed by the last pick. Run it back."}
           </p>
           <button
             type="button"
@@ -456,14 +440,14 @@ export default function MovieGame() {
           onSelect={() => handleGuess("left")}
           disabled={gameOver || feedback !== "idle"}
           variant={getCardVariant(pair.left, "left")}
-          revealRating={shouldRevealRating(pair.left)}
+          revealRating={shouldRevealRating()}
         />
         <MovieCard
           movie={pair.right}
           onSelect={() => handleGuess("right")}
           disabled={gameOver || feedback !== "idle"}
           variant={getCardVariant(pair.right, "right")}
-          revealRating={shouldRevealRating(pair.right)}
+          revealRating={shouldRevealRating()}
         />
       </div>
 

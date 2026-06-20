@@ -9,8 +9,6 @@ export type GameMode = "classic" | "difficult";
 
 export type GuessChoice = "left" | "right" | "same";
 
-export type CardSide = "left" | "right";
-
 export type MoviePair = {
   left: Movie;
   right: Movie;

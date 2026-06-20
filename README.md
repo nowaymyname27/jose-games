@@ -80,7 +80,8 @@ The app uses the cached poster URLs at runtime, so gameplay does not depend on l
 
 - `Classic` mode only generates matchups between movies with different ratings.
 - `Difficult` mode allows same-rating matchups, adds a `Same Rating` answer button, and keeps all matchups within a 1-star difference.
-- Both modes use the carry-over system where one movie advances to the next round.
+- In both modes, each round is a fresh random matchup and movies do not repeat within a run.
+- A run ends once there are no more valid unused matchups left for the current mode.
 - High score is stored in `localStorage` in the browser.
 - Poster images are fetched from TMDb once and then stored in the local cache file.
 - No authentication, backend API, or database is included yet.
