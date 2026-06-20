@@ -5,7 +5,9 @@ export type Movie = {
   posterUrl?: string;
 };
 
-export type GameMode = "classic";
+export type GameMode = "classic" | "difficult";
+
+export type GuessChoice = "left" | "right" | "same";
 
 export type CardSide = "left" | "right";
 

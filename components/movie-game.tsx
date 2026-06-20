@@ -6,9 +6,10 @@ import MovieCard from "@/components/movie-card";
 import ScoreBoard from "@/components/score-board";
 import { loadMovies } from "@/lib/csv";
 import {
+  getCorrectChoice,
   getHigherRatedMovie,
   getMovieSide,
-  getNextClassicCarryOver,
+  getNextCarryOverMovie,
   getPairWithCarryOver,
   getRandomPair,
   isCorrectGuess,
@@ -16,18 +17,37 @@ import {
 import { getMovieKey } from "@/lib/movie-key";
 import { formatRating } from "@/lib/ratings";
 import { readHighScore, writeHighScore } from "@/lib/storage";
-import type { CardSide, GameMode, Movie, MoviePair } from "@/lib/types";
+import type {
+  CardSide,
+  GameMode,
+  GuessChoice,
+  Movie,
+  MoviePair,
+} from "@/lib/types";
 
 const ROUND_EXIT_DURATION_MS = 140;
 const ROUND_ENTER_DURATION_MS = 180;
 
 type RoundTransition = "idle" | "exiting" | "entering";
 
+function getModeRules(mode: GameMode) {
+  return mode === "classic"
+    ? {
+        allowEqualRatings: false,
+        maxRatingDifference: null,
+      }
+    : {
+        allowEqualRatings: true,
+        maxRatingDifference: 1,
+      };
+}
+
 export default function MovieGame() {
   const feedbackTimeoutRef = useRef<number | null>(null);
   const roundExitTimeoutRef = useRef<number | null>(null);
   const roundEnterTimeoutRef = useRef<number | null>(null);
-  const mode: GameMode = "classic";
+
+  const [mode, setMode] = useState<GameMode>("classic");
   const [movies, setMovies] = useState<Movie[]>([]);
   const [pair, setPair] = useState<MoviePair | null>(null);
   const [score, setScore] = useState(0);
@@ -38,21 +58,29 @@ export default function MovieGame() {
   const [feedback, setFeedback] = useState<"idle" | "correct" | "wrong">(
     "idle",
   );
-  const [selectedMovie, setSelectedMovie] = useState<Movie | null>(null);
+  const [selectedChoice, setSelectedChoice] = useState<GuessChoice | null>(null);
   const [carryOverMovie, setCarryOverMovie] = useState<Movie | null>(null);
   const [pendingCarryOverMovie, setPendingCarryOverMovie] = useState<Movie | null>(null);
   const [pendingCarryOverSide, setPendingCarryOverSide] = useState<CardSide | null>(null);
   const [persistedRevealMovieKey, setPersistedRevealMovieKey] = useState<string | null>(null);
   const [roundTransition, setRoundTransition] = useState<RoundTransition>("idle");
 
-  function getClassicPair(
+  function getPairForMode(
+    gameMode: GameMode,
     nextCarryOverMovie: Movie | null,
     nextCarryOverSide: CardSide | null,
     moviePool: Movie[],
   ) {
+    const rules = getModeRules(gameMode);
+
     return nextCarryOverMovie && nextCarryOverSide
-      ? getPairWithCarryOver(moviePool, nextCarryOverMovie, nextCarryOverSide)
-      : getRandomPair(moviePool);
+      ? getPairWithCarryOver(
+          moviePool,
+          nextCarryOverMovie,
+          nextCarryOverSide,
+          rules,
+        )
+      : getRandomPair(moviePool, rules);
   }
 
   useEffect(() => {
@@ -65,10 +93,10 @@ export default function MovieGame() {
           return;
         }
 
-        const nextPair = getClassicPair(null, null, loadedMovies);
+        const nextPair = getPairForMode("classic", null, null, loadedMovies);
 
         if (!nextPair) {
-          setError("Your CSV needs at least two movies with different ratings.");
+          setError("Your CSV needs more valid rating combinations to start playing.");
           return;
         }
 
@@ -106,12 +134,6 @@ export default function MovieGame() {
     }
   }
 
-  function resetFeedbackState() {
-    clearFeedbackTimeout();
-    setFeedback("idle");
-    setSelectedMovie(null);
-  }
-
   function clearRoundTransitionTimeouts() {
     if (roundExitTimeoutRef.current !== null) {
       window.clearTimeout(roundExitTimeoutRef.current);
@@ -124,8 +146,36 @@ export default function MovieGame() {
     }
   }
 
+  function resetFeedbackState() {
+    clearFeedbackTimeout();
+    setFeedback("idle");
+    setSelectedChoice(null);
+  }
+
+  function applyFreshRound(gameMode: GameMode, nextScore: number) {
+    const nextPair = getPairForMode(gameMode, null, null, movies);
+
+    if (!nextPair) {
+      setError("This mode needs more valid rating combinations from the CSV.");
+      return;
+    }
+
+    setMode(gameMode);
+    setScore(nextScore);
+    setGameOver(false);
+    setPair(nextPair);
+    setCarryOverMovie(null);
+    setPendingCarryOverMovie(null);
+    setPendingCarryOverSide(null);
+    setPersistedRevealMovieKey(null);
+    setRoundTransition("idle");
+    resetFeedbackState();
+    setError(null);
+  }
+
   function applyNextRound(nextScore: number) {
-    const nextPair = getClassicPair(
+    const nextPair = getPairForMode(
+      mode,
       pendingCarryOverMovie,
       pendingCarryOverSide,
       movies,
@@ -165,16 +215,16 @@ export default function MovieGame() {
     }, ROUND_EXIT_DURATION_MS);
   }
 
-  function handlePick(selectedMovie: Movie) {
+  function handleGuess(guessChoice: GuessChoice) {
     if (!pair || gameOver || feedback !== "idle") {
       return;
     }
 
-    setSelectedMovie(selectedMovie);
+    setSelectedChoice(guessChoice);
 
-    if (isCorrectGuess(pair, selectedMovie)) {
+    if (isCorrectGuess(pair, guessChoice)) {
       const nextScore = score + 1;
-      const nextCarryOverMovie = getNextClassicCarryOver(pair, carryOverMovie);
+      const nextCarryOverMovie = getNextCarryOverMovie(pair, carryOverMovie);
       const nextCarryOverSide = getMovieSide(pair, nextCarryOverMovie);
 
       if (nextScore > highScore) {
@@ -190,7 +240,6 @@ export default function MovieGame() {
       );
       setRoundTransition("idle");
       setFeedback("correct");
-
       return;
     }
 
@@ -202,54 +251,53 @@ export default function MovieGame() {
   }
 
   function handleRestart() {
-    resetFeedbackState();
     clearRoundTransitionTimeouts();
+    applyFreshRound(mode, 0);
+  }
 
-    const nextPair = getClassicPair(null, null, movies);
-
-    if (!nextPair) {
-      setError("Your CSV needs at least two movies with different ratings.");
+  function handleModeChange(nextMode: GameMode) {
+    if (nextMode === mode) {
       return;
     }
 
-    setScore(0);
-    setGameOver(false);
-    setPair(nextPair);
-    setCarryOverMovie(null);
-    setPendingCarryOverMovie(null);
-    setPendingCarryOverSide(null);
-    setPersistedRevealMovieKey(null);
-    setRoundTransition("idle");
-    setError(null);
+    clearRoundTransitionTimeouts();
+    applyFreshRound(nextMode, 0);
   }
 
-  const correctMovie = pair ? getHigherRatedMovie(pair) : null;
-  const selectedMovieRating = selectedMovie?.rating;
-  const correctMovieRating = correctMovie?.rating;
+  const correctChoice = pair ? getCorrectChoice(pair) : null;
+  const correctMovie =
+    pair && correctChoice !== "same" ? getHigherRatedMovie(pair) : null;
 
-  function getCardVariant(movie: Movie): "default" | "correct" | "wrong" | "missed" {
-    if (!selectedMovie || !correctMovie) {
+  function getCardVariant(
+    movie: Movie,
+    side: Exclude<GuessChoice, "same">,
+  ): "default" | "correct" | "wrong" | "missed" {
+    if (!selectedChoice || !correctChoice) {
       return "default";
     }
 
-    const isSelected =
-      movie.name === selectedMovie.name && movie.year === selectedMovie.year;
-    const isCorrect =
-      movie.name === correctMovie.name && movie.year === correctMovie.year;
+    if (feedback === "correct") {
+      if (correctChoice === "same") {
+        return "correct";
+      }
 
-    if (feedback === "correct" && isSelected) {
-      return "correct";
+      return selectedChoice === side ? "correct" : "default";
     }
 
-    if (feedback === "wrong" && isSelected) {
+    if (selectedChoice === side) {
       return "wrong";
     }
 
-    if (feedback === "wrong" && isCorrect) {
+    if (correctChoice === "same") {
       return "missed";
     }
 
-    return "default";
+    const isCorrect = correctMovie
+      ? getMovieKey(movie.name, movie.year) ===
+        getMovieKey(correctMovie.name, correctMovie.year)
+      : false;
+
+    return isCorrect ? "missed" : "default";
   }
 
   function shouldRevealRating(movie: Movie): boolean {
@@ -259,6 +307,39 @@ export default function MovieGame() {
 
     return getMovieKey(movie.name, movie.year) === persistedRevealMovieKey;
   }
+
+  function getFeedbackMessage() {
+    if (!pair || !correctChoice) {
+      return null;
+    }
+
+    if (feedback === "correct") {
+      if (correctChoice === "same") {
+        return `Correct. Jose gave both movies the same rating: ${formatRating(pair.left.rating)}.`;
+      }
+
+      const guessedMovie = correctChoice === "left" ? pair.left : pair.right;
+      const otherMovie = correctChoice === "left" ? pair.right : pair.left;
+
+      return `Correct. Score +1. Jose rated this matchup ${formatRating(guessedMovie.rating)} vs ${formatRating(otherMovie.rating)}.`;
+    }
+
+    if (feedback === "wrong") {
+      if (correctChoice === "same") {
+        return `Wrong. Jose gave both movies the same rating: ${formatRating(pair.left.rating)}.`;
+      }
+
+      return `Wrong. Jose rated ${correctMovie?.name} higher, ${formatRating(
+        pair.left.rating > pair.right.rating ? pair.left.rating : pair.right.rating,
+      )} vs ${formatRating(
+        pair.left.rating > pair.right.rating ? pair.right.rating : pair.left.rating,
+      )}.`;
+    }
+
+    return null;
+  }
+
+  const feedbackMessage = getFeedbackMessage();
 
   const roundTransitionClassName =
     roundTransition === "exiting"
@@ -282,7 +363,7 @@ export default function MovieGame() {
           {error ?? "Something went wrong."}
         </p>
         <p className="text-sm text-red-100/70">
-          Check `public/data/letterboxd-ratings.csv` or use the included sample file.
+          Check `public/data/ratings.csv` or use the included sample file.
         </p>
       </div>
     );
@@ -294,33 +375,46 @@ export default function MovieGame() {
         <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-slate-400 sm:text-xs sm:tracking-[0.2em]">
           Mode
         </p>
-        <div className="inline-flex rounded-full border border-amber-300/40 bg-amber-300/12 px-3 py-1.5 text-sm font-semibold text-amber-100">
-          {mode === "classic" ? "Classic" : mode}
+
+        <div className="flex flex-wrap gap-2">
+          {(["classic", "difficult"] as const).map((modeOption) => {
+            const isActive = modeOption === mode;
+
+            return (
+              <button
+                key={modeOption}
+                type="button"
+                onClick={() => handleModeChange(modeOption)}
+                className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                  isActive
+                    ? "border border-amber-300/40 bg-amber-300/12 text-amber-100"
+                    : "border border-white/10 bg-slate-950/30 text-slate-300 hover:border-white/20 hover:bg-white/6"
+                }`}
+              >
+                {modeOption === "classic" ? "Classic" : "Difficult"}
+              </button>
+            );
+          })}
         </div>
+
         <p className="text-sm leading-5 text-slate-300">
-          Winning movies carry forward for one extra round.
+          {mode === "classic"
+            ? "Winning movies carry forward for one extra round."
+            : "Movies stay within one star, and equal ratings can be guessed."}
         </p>
       </div>
 
       <ScoreBoard highScore={highScore} score={score} />
 
-      {feedback === "correct" ? (
+      {feedback === "correct" && feedbackMessage ? (
         <div className="rounded-[1.35rem] border border-emerald-300/30 bg-emerald-400/12 px-4 py-3 text-center text-sm leading-5 text-emerald-100 animate-success-pulse sm:rounded-2xl sm:text-base">
-          Correct. Score +1. Jose rated this matchup {formatRating(selectedMovieRating ?? 0)} vs{" "}
-          {formatRating(
-            pair.left.name === selectedMovie?.name &&
-              pair.left.year === selectedMovie?.year
-              ? pair.right.rating
-              : pair.left.rating,
-          )}
-          .
+          {feedbackMessage}
         </div>
       ) : null}
 
-      {feedback === "wrong" && correctMovie ? (
+      {feedback === "wrong" && feedbackMessage ? (
         <div className="rounded-[1.35rem] border border-rose-300/30 bg-rose-400/12 px-4 py-3 text-center text-sm leading-5 text-rose-100 animate-failure-shake sm:rounded-2xl sm:text-base">
-          Wrong. Jose rated <span className="font-semibold">{correctMovie.name}</span>{" "}
-          higher, {formatRating(correctMovieRating ?? 0)} vs {formatRating(selectedMovieRating ?? 0)}.
+          {feedbackMessage}
         </div>
       ) : null}
 
@@ -333,7 +427,7 @@ export default function MovieGame() {
             Final score: {score}
           </h2>
           <p className="mt-3 text-sm leading-5 text-slate-300 sm:text-base">
-            The higher-rated movie was revealed by your last pick. Run it back.
+            The ratings were revealed by the last pick. Run it back.
           </p>
           <button
             type="button"
@@ -350,26 +444,47 @@ export default function MovieGame() {
           Which Movie Did Jose Rate Higher?
         </p>
         <p className="text-sm leading-5 text-slate-300 sm:text-base">
-          Choose the movie Jose rated higher on Letterboxd.
+          {mode === "classic"
+            ? "Choose the movie Jose rated higher on Letterboxd."
+            : "Choose the higher-rated movie, or pick Same Rating if both match."}
         </p>
       </div>
 
       <div className={`grid gap-2.5 md:grid-cols-2 md:gap-4 ${roundTransitionClassName}`}>
         <MovieCard
           movie={pair.left}
-          onSelect={handlePick}
+          onSelect={() => handleGuess("left")}
           disabled={gameOver || feedback !== "idle"}
-          variant={getCardVariant(pair.left)}
+          variant={getCardVariant(pair.left, "left")}
           revealRating={shouldRevealRating(pair.left)}
         />
         <MovieCard
           movie={pair.right}
-          onSelect={handlePick}
+          onSelect={() => handleGuess("right")}
           disabled={gameOver || feedback !== "idle"}
-          variant={getCardVariant(pair.right)}
+          variant={getCardVariant(pair.right, "right")}
           revealRating={shouldRevealRating(pair.right)}
         />
       </div>
+
+      {mode === "difficult" ? (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => handleGuess("same")}
+            disabled={gameOver || feedback !== "idle"}
+            className={`inline-flex w-full items-center justify-center rounded-full px-5 py-3 text-sm font-semibold transition sm:w-auto ${
+              feedback === "correct" && correctChoice === "same"
+                ? "border border-emerald-300/60 bg-emerald-400/12 text-emerald-100"
+                : feedback === "wrong" && selectedChoice === "same"
+                  ? "border border-rose-300/60 bg-rose-400/12 text-rose-100"
+                  : "border border-white/15 bg-white/5 text-slate-100 hover:border-white/30 hover:bg-white/8"
+            } disabled:cursor-not-allowed disabled:opacity-70`}
+          >
+            Same Rating
+          </button>
+        </div>
+      ) : null}
 
       {feedback === "correct" ? (
         <div className="flex justify-center">

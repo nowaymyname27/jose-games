@@ -2,7 +2,7 @@
 
 ## Project Purpose
 
-Jose Games is a personal mini-game collection built with Next.js. The first game is `Which Movie Did I Rate Higher?`, where the player picks which of two movies Jose rated higher on Letterboxd.
+Jose Games is a personal mini-game collection built with Next.js. The first game is `Which Movie Did Jose Rate Higher?`, where the player picks which of two movies Jose rated higher on Letterboxd.
 
 The app currently uses a local CSV file as its data source so it stays simple and easy to extend.
 
@@ -78,7 +78,9 @@ The app uses the cached poster URLs at runtime, so gameplay does not depend on l
 
 ## Notes
 
-- The game only generates matchups between movies with different ratings.
+- `Classic` mode only generates matchups between movies with different ratings.
+- `Difficult` mode allows same-rating matchups, adds a `Same Rating` answer button, and keeps all matchups within a 1-star difference.
+- Both modes use the carry-over system where one movie advances to the next round.
 - High score is stored in `localStorage` in the browser.
 - Poster images are fetched from TMDb once and then stored in the local cache file.
 - No authentication, backend API, or database is included yet.

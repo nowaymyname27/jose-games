@@ -1,21 +1,59 @@
 import { getMovieKey } from "@/lib/movie-key";
-import type { CardSide, Movie, MoviePair } from "@/lib/types";
+import type {
+  CardSide,
+  GuessChoice,
+  Movie,
+  MoviePair,
+} from "@/lib/types";
+
+type PairRules = {
+  allowEqualRatings: boolean;
+  maxRatingDifference: number | null;
+};
 
 function randomItem<T>(items: T[]): T {
   return items[Math.floor(Math.random() * items.length)];
 }
 
-export function getRandomPair(movies: Movie[]): MoviePair | null {
+function isWithinAllowedRange(
+  leftRating: number,
+  rightRating: number,
+  maxRatingDifference: number | null,
+): boolean {
+  if (maxRatingDifference === null) {
+    return true;
+  }
+
+  return Math.abs(leftRating - rightRating) <= maxRatingDifference;
+}
+
+function isValidPairCandidate(
+  baseMovie: Movie,
+  candidate: Movie,
+  rules: PairRules,
+): boolean {
+  if (getMovieKey(baseMovie.name, baseMovie.year) === getMovieKey(candidate.name, candidate.year)) {
+    return false;
+  }
+
+  if (!rules.allowEqualRatings && baseMovie.rating === candidate.rating) {
+    return false;
+  }
+
+  return isWithinAllowedRange(
+    baseMovie.rating,
+    candidate.rating,
+    rules.maxRatingDifference,
+  );
+}
+
+export function getRandomPair(movies: Movie[], rules: PairRules): MoviePair | null {
   if (movies.length < 2) {
     return null;
   }
 
   const left = randomItem(movies);
-  const candidates = movies.filter(
-    (movie) =>
-      movie.name !== left.name &&
-      movie.rating !== left.rating,
-  );
+  const candidates = movies.filter((movie) => isValidPairCandidate(left, movie, rules));
 
   if (candidates.length === 0) {
     return null;
@@ -31,12 +69,10 @@ export function getPairWithCarryOver(
   movies: Movie[],
   carryOverMovie: Movie,
   carryOverSide: CardSide,
+  rules: PairRules,
 ): MoviePair | null {
-  const carryOverKey = getMovieKey(carryOverMovie.name, carryOverMovie.year);
-  const candidates = movies.filter(
-    (movie) =>
-      getMovieKey(movie.name, movie.year) !== carryOverKey &&
-      movie.rating !== carryOverMovie.rating,
+  const candidates = movies.filter((movie) =>
+    isValidPairCandidate(carryOverMovie, movie, rules),
   );
 
   if (candidates.length === 0) {
@@ -76,11 +112,29 @@ export function getMovieSide(pair: MoviePair, movie: Movie): CardSide {
     : "right";
 }
 
-export function getNextClassicCarryOver(
+export function getCorrectChoice(pair: MoviePair): GuessChoice {
+  if (pair.left.rating === pair.right.rating) {
+    return "same";
+  }
+
+  return pair.left.rating > pair.right.rating ? "left" : "right";
+}
+
+export function getNextCarryOverMovie(
   pair: MoviePair,
   currentCarryOverMovie: Movie | null,
 ): Movie {
-  const winner = getHigherRatedMovie(pair);
+  const correctChoice = getCorrectChoice(pair);
+
+  if (correctChoice === "same") {
+    if (!currentCarryOverMovie) {
+      return randomItem([pair.left, pair.right]);
+    }
+
+    return getOtherMovie(pair, currentCarryOverMovie);
+  }
+
+  const winner = correctChoice === "left" ? pair.left : pair.right;
 
   if (!currentCarryOverMovie) {
     return winner;
@@ -99,11 +153,6 @@ export function getNextClassicCarryOver(
   return winner;
 }
 
-export function isCorrectGuess(pair: MoviePair, selectedMovie: Movie): boolean {
-  const higherRatedMovie = getHigherRatedMovie(pair);
-
-  return (
-    selectedMovie.name === higherRatedMovie.name &&
-    selectedMovie.year === higherRatedMovie.year
-  );
+export function isCorrectGuess(pair: MoviePair, guessChoice: GuessChoice): boolean {
+  return getCorrectChoice(pair) === guessChoice;
 }
