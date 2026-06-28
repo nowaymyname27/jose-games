@@ -43,7 +43,7 @@ export default function MovieGame() {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [pair, setPair] = useState<MoviePair | null>(null);
   const [score, setScore] = useState(0);
-  const [highScore, setHighScore] = useState<number>(() => readHighScore());
+  const [highScore, setHighScore] = useState<number>(() => readHighScore("classic"));
   const [gameOver, setGameOver] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +110,10 @@ export default function MovieGame() {
       }
     };
   }, []);
+
+  useEffect(() => {
+    setHighScore(readHighScore(mode));
+  }, [mode]);
 
   function clearFeedbackTimeout() {
     if (feedbackTimeoutRef.current !== null) {
@@ -218,7 +222,7 @@ export default function MovieGame() {
 
       if (nextScore > highScore) {
         setHighScore(nextScore);
-        writeHighScore(nextScore);
+        writeHighScore(mode, nextScore);
       }
 
       setScore(nextScore);
