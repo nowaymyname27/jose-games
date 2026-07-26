@@ -505,6 +505,30 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
     }
   }
 
+  function handleGenerateRandomBracket() {
+    if (movies.length < 16) {
+      setError("You need at least 16 rated movies to generate a random tournament.");
+      return;
+    }
+
+    const randomMovies = shuffleMovies(movies).slice(0, 16);
+
+    setCreateTitle("Random Movie Tournament");
+    setSetupMode("seeded");
+    setSelectedMovies(
+      randomMovies.map((movie, index) => ({
+        label: movie.name,
+        year: movie.year,
+        posterUrl: movie.posterUrl,
+        seed: index + 1,
+      })),
+    );
+    setMovieSearch("");
+    setRemoteMovies([]);
+    setRemoteMoviesQuery("");
+    setError(null);
+  }
+
   function handleSwitchSetupMode(nextMode: BracketSetupMode) {
     if (nextMode === setupMode) {
       return;
@@ -608,13 +632,24 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
             </div>
 
             <div className="rounded-[1.35rem] border border-violet-300/12 bg-violet-400/6 p-3.5">
-              <div>
-                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-violet-200/75">
-                  Preset Brackets
-                </p>
-                <p className="mt-1 text-sm leading-6 text-slate-300">
-                  Load a fully seeded bracket instantly, then tweak any picks you want.
-                </p>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-violet-200/75">
+                    Preset Brackets
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-slate-300">
+                    Load a fully seeded bracket instantly, then tweak any picks you want.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleGenerateRandomBracket}
+                  disabled={loadingMovies || submitting}
+                  className="rounded-full border border-violet-300/25 bg-violet-300/10 px-4 py-2 text-sm font-semibold text-violet-100 transition hover:border-violet-200/40 hover:bg-violet-300/16 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Random 16
+                </button>
               </div>
 
               <div className="mt-3 grid gap-3 xl:grid-cols-2">
@@ -1429,6 +1464,20 @@ function swapMovieIndices(
   nextMovies[rightIndex] = leftMovie;
 
   return nextMovies;
+}
+
+function shuffleMovies(movies: Movie[]) {
+  const shuffledMovies = [...movies];
+
+  for (let index = shuffledMovies.length - 1; index > 0; index -= 1) {
+    const swapIndex = Math.floor(Math.random() * (index + 1));
+    const currentMovie = shuffledMovies[index];
+
+    shuffledMovies[index] = shuffledMovies[swapIndex];
+    shuffledMovies[swapIndex] = currentMovie;
+  }
+
+  return shuffledMovies;
 }
 
 async function postRoomAction(url: string, body: Record<string, unknown>) {
