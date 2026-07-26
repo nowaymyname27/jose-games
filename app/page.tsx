@@ -3,7 +3,7 @@ import SiteMenu from "@/components/site-menu";
 
 export default function Home() {
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col px-4 py-5 sm:px-8 sm:py-12">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1550px] flex-col px-4 py-5 sm:px-6 sm:py-10 lg:px-8 xl:px-10">
       <div className="mb-6 space-y-3 sm:mb-10 sm:space-y-4">
         <div className="flex justify-end">
           <SiteMenu />

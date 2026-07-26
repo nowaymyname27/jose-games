@@ -13,6 +13,10 @@ const GAMES = [
     href: "/guess-who",
     label: "Guess Who?",
   },
+  {
+    href: "/tournament",
+    label: "Tournament Lobby",
+  },
 ];
 
 export default function SiteMenu() {
@@ -41,10 +45,6 @@ export default function SiteMenu() {
       document.removeEventListener("keydown", handleEscape);
     };
   }, []);
-
-  useEffect(() => {
-    setIsOpen(false);
-  }, [pathname]);
 
   return (
     <div ref={containerRef} className="relative flex justify-end">
@@ -77,6 +77,7 @@ export default function SiteMenu() {
                 <Link
                   key={game.href}
                   href={game.href}
+                  onClick={() => setIsOpen(false)}
                   className={`flex items-center justify-between rounded-xl px-3 py-2.5 text-sm font-medium transition ${
                     isActive
                       ? "bg-white/10 text-white"

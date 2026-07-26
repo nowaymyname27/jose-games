@@ -10,6 +10,7 @@
     "fetch-posters": "tsx scripts/fetch-posters.ts"
   },
   "dependencies": {
+    "@supabase/supabase-js": "^2.110.8",
     "next": "16.2.9",
     "papaparse": "^5.5.4",
     "react": "19.2.4",

@@ -21,6 +21,33 @@ type GuessWhoGameProps = {
   catalog: GuessWhoCatalog;
 };
 
+type GuessWhoLocalState = {
+  boardKey: string;
+  draftCategoryId: GuessWhoCategory["id"];
+  draftSize: number;
+  draftSeed: string;
+  eliminatedIds: string[];
+  selectedId: string | null;
+  copyStatus: string | null;
+};
+
+function createGuessWhoLocalState(
+  boardKey: string,
+  categoryId: GuessWhoCategory["id"],
+  boardSize: number,
+  boardSeed: string,
+): GuessWhoLocalState {
+  return {
+    boardKey,
+    draftCategoryId: categoryId,
+    draftSize: boardSize,
+    draftSeed: boardSeed,
+    eliminatedIds: [],
+    selectedId: null,
+    copyStatus: null,
+  };
+}
+
 export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -31,7 +58,10 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
     : catalog.defaultCategoryId;
   const category =
     catalog.categories.find((entry) => entry.id === categoryId) ?? catalog.categories[0];
-  const categoryEntries = category ? catalog.entriesByCategory[category.id] ?? [] : [];
+  const categoryEntries = useMemo(
+    () => (category ? catalog.entriesByCategory[category.id] ?? [] : []),
+    [catalog.entriesByCategory, category],
+  );
   const sizeOptions = getBoardSizeOptions(categoryEntries.length);
   const activeSize = parseBoardSize(searchParams.get("size"), categoryEntries.length);
   const activeSeed = normalizeSeed(searchParams.get("seed"));
@@ -40,12 +70,15 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
     [activeSeed, activeSize, category.id, categoryEntries],
   );
   const boardKey = `${category.id}:${board.size}:${board.seed}`;
-  const [draftCategoryId, setDraftCategoryId] = useState<GuessWhoCategory["id"]>(category.id);
-  const [draftSize, setDraftSize] = useState(board.size);
-  const [draftSeed, setDraftSeed] = useState(board.seed);
-  const [eliminatedIds, setEliminatedIds] = useState<string[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [copyStatus, setCopyStatus] = useState<string | null>(null);
+  const fallbackLocalState = createGuessWhoLocalState(
+    boardKey,
+    category.id,
+    board.size,
+    board.seed,
+  );
+  const [localState, setLocalState] = useState<GuessWhoLocalState>(fallbackLocalState);
+  const activeLocalState =
+    localState.boardKey === boardKey ? localState : fallbackLocalState;
 
   useEffect(() => {
     if (categoryEntries.length === 0 || searchParams.get("seed")) {
@@ -58,15 +91,6 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
     params.set("seed", createRandomSeed());
     router.replace(`${pathname}?${params.toString()}`);
   }, [catalog.defaultCategoryId, category.id, categoryEntries.length, pathname, router, searchParams]);
-
-  useEffect(() => {
-    setDraftCategoryId(category.id);
-    setDraftSize(board.size);
-    setDraftSeed(board.seed);
-    setEliminatedIds([]);
-    setSelectedId(null);
-    setCopyStatus(null);
-  }, [board.size, board.seed, boardKey, category.id]);
 
   function updateBoardParams(nextCategoryId: GuessWhoCategory["id"], nextSize: number, nextSeed: string) {
     const params = new URLSearchParams(searchParams.toString());
@@ -81,24 +105,36 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
     const shareUrl = `${window.location.origin}${pathname}?category=${category.id}&size=${board.size}&seed=${board.seed}`;
 
     void navigator.clipboard.writeText(shareUrl).then(() => {
-      setCopyStatus("Share link copied.");
+      setLocalState((currentState) => ({
+        ...resolveLocalState(currentState, fallbackLocalState),
+        copyStatus: "Share link copied.",
+      }));
     });
   }
 
   function handleToggleEliminated(entryId: string) {
-    setEliminatedIds((currentIds) => {
-      const isEliminated = currentIds.includes(entryId);
+    setLocalState((currentState) => {
+      const resolvedState = resolveLocalState(currentState, fallbackLocalState);
+      const isEliminated = resolvedState.eliminatedIds.includes(entryId);
 
-      if (isEliminated) {
-        return currentIds.filter((id) => id !== entryId);
-      }
-
-      return [...currentIds, entryId];
+      return {
+        ...resolvedState,
+        eliminatedIds: isEliminated
+          ? resolvedState.eliminatedIds.filter((id) => id !== entryId)
+          : [...resolvedState.eliminatedIds, entryId],
+      };
     });
   }
 
   function handleToggleSelected(entryId: string) {
-    setSelectedId((currentSelectedId) => (currentSelectedId === entryId ? null : entryId));
+    setLocalState((currentState) => {
+      const resolvedState = resolveLocalState(currentState, fallbackLocalState);
+
+      return {
+        ...resolvedState,
+        selectedId: resolvedState.selectedId === entryId ? null : entryId,
+      };
+    });
   }
 
   function handleRandomPick() {
@@ -107,11 +143,15 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
     }
 
     const randomEntry = board.entries[Math.floor(Math.random() * board.entries.length)];
-    setSelectedId(randomEntry.id);
+    setLocalState((currentState) => ({
+      ...resolveLocalState(currentState, fallbackLocalState),
+      selectedId: randomEntry.id,
+    }));
   }
 
-  const activeCount = board.entries.length - eliminatedIds.length;
-  const selectedEntry = board.entries.find((entry) => entry.id === selectedId) ?? null;
+  const activeCount = board.entries.length - activeLocalState.eliminatedIds.length;
+  const selectedEntry =
+    board.entries.find((entry) => entry.id === activeLocalState.selectedId) ?? null;
 
   if (categoryEntries.length < 2) {
     return (
@@ -140,17 +180,43 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
 
       <GuessWhoControls
         categoryOptions={catalog.categories}
-        draftCategoryId={draftCategoryId}
+        draftCategoryId={activeLocalState.draftCategoryId}
         sizeOptions={sizeOptions}
-        draftSize={draftSize}
-        draftSeed={draftSeed}
-        onDraftCategoryChange={setDraftCategoryId}
-        onDraftSizeChange={setDraftSize}
-        onDraftSeedChange={setDraftSeed}
-        onRandomizeSeed={() => setDraftSeed(createRandomSeed())}
-        onLoadBoard={() => updateBoardParams(draftCategoryId, draftSize, draftSeed)}
+        draftSize={activeLocalState.draftSize}
+        draftSeed={activeLocalState.draftSeed}
+        onDraftCategoryChange={(nextCategoryId) => {
+          setLocalState((currentState) => ({
+            ...resolveLocalState(currentState, fallbackLocalState),
+            draftCategoryId: nextCategoryId,
+          }));
+        }}
+        onDraftSizeChange={(nextSize) => {
+          setLocalState((currentState) => ({
+            ...resolveLocalState(currentState, fallbackLocalState),
+            draftSize: nextSize,
+          }));
+        }}
+        onDraftSeedChange={(nextSeed) => {
+          setLocalState((currentState) => ({
+            ...resolveLocalState(currentState, fallbackLocalState),
+            draftSeed: nextSeed,
+          }));
+        }}
+        onRandomizeSeed={() => {
+          setLocalState((currentState) => ({
+            ...resolveLocalState(currentState, fallbackLocalState),
+            draftSeed: createRandomSeed(),
+          }));
+        }}
+        onLoadBoard={() =>
+          updateBoardParams(
+            activeLocalState.draftCategoryId,
+            activeLocalState.draftSize,
+            activeLocalState.draftSeed,
+          )
+        }
         onCopyLink={handleCopyLink}
-        copyStatus={copyStatus}
+        copyStatus={activeLocalState.copyStatus}
       />
 
       <div className="mx-auto w-full max-w-[280px] rounded-[1.1rem] border border-red-950/70 bg-[#12080a] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:max-w-[320px] sm:p-4">
@@ -223,13 +289,18 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
               </p>
             </div>
 
-            {selectedEntry ? (
-              <button
-                type="button"
-                onClick={() => setSelectedId(null)}
-                className="rounded-full border border-red-900/60 bg-[#190b0d] px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-red-700/70 hover:bg-[#241012]"
-              >
-                Clear
+                {selectedEntry ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLocalState((currentState) => ({
+                        ...resolveLocalState(currentState, fallbackLocalState),
+                        selectedId: null,
+                      }));
+                    }}
+                    className="rounded-full border border-red-900/60 bg-[#190b0d] px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-red-700/70 hover:bg-[#241012]"
+                  >
+                    Clear
               </button>
             ) : null}
           </div>
@@ -250,7 +321,7 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
               <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-slate-500 sm:text-xs">
                 Crossed Off
               </p>
-              <p className="mt-1 text-2xl font-semibold text-white">{eliminatedIds.length}</p>
+               <p className="mt-1 text-2xl font-semibold text-white">{activeLocalState.eliminatedIds.length}</p>
             </div>
 
             <div className="bg-[#12080a] px-4 py-3.5">
@@ -266,8 +337,11 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
               <button
                 type="button"
                 onClick={() => {
-                  setEliminatedIds([]);
-                  setSelectedId(null);
+                  setLocalState((currentState) => ({
+                    ...resolveLocalState(currentState, fallbackLocalState),
+                    eliminatedIds: [],
+                    selectedId: null,
+                  }));
                 }}
                 className="rounded-full border border-red-900/60 bg-[#190b0d] px-4 py-2 text-sm font-medium text-slate-100 transition hover:border-red-700/70 hover:bg-[#241012]"
               >
@@ -295,8 +369,8 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
             <GuessWhoCard
               key={entry.id}
               entry={entry}
-              state={eliminatedIds.includes(entry.id) ? "eliminated" : "active"}
-              isSelected={selectedId === entry.id}
+              state={activeLocalState.eliminatedIds.includes(entry.id) ? "eliminated" : "active"}
+              isSelected={activeLocalState.selectedId === entry.id}
               onToggleEliminated={() => handleToggleEliminated(entry.id)}
               onToggleSelected={() => handleToggleSelected(entry.id)}
             />
@@ -305,4 +379,13 @@ export default function GuessWhoGame({ catalog }: GuessWhoGameProps) {
       </div>
     </div>
   );
+}
+
+function resolveLocalState(
+  currentState: GuessWhoLocalState,
+  fallbackState: GuessWhoLocalState,
+) {
+  return currentState.boardKey === fallbackState.boardKey
+    ? currentState
+    : fallbackState;
 }

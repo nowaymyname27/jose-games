@@ -4,6 +4,11 @@
 
 Jose Games is a personal mini-game collection built with Next.js. The first game is `Which Movie Did Jose Rate Higher?`, where the player picks which of two movies Jose rated higher on Letterboxd.
 
+The app also includes:
+
+- `Guess Who?` with shared board seeds
+- `Tournament Lobby` for shared 4, 8, or 16-entry brackets with room codes and live vote syncing
+
 The app currently uses a local CSV file as its data source so it stays simple and easy to extend.
 
 ## Run Locally
@@ -85,6 +90,33 @@ The app uses the cached poster URLs at runtime, so gameplay does not depend on l
 - High score is stored in `localStorage` in the browser.
 - Poster images are fetched from TMDb once and then stored in the local cache file.
 - No authentication, backend API, or database is included yet.
+
+## Tournament Lobby Setup
+
+The tournament lobby uses Supabase as its shared backend.
+
+1. Create a Supabase project.
+2. Add these variables to `.env.local`:
+
+```bash
+NEXT_PUBLIC_SUPABASE_URL=your_supabase_url
+SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
+```
+
+3. Run the SQL in:
+
+```text
+supabase/tournament-schema.sql
+```
+
+4. Restart the dev server.
+
+Notes:
+
+- The first version stores each room as a JSON document in one `tournament_rooms` table.
+- Room creators become the host.
+- Players join with a browser session id and display name.
+- Matchups use majority vote, and tied rounds require a host tiebreak.
 
 ## Future Features
 

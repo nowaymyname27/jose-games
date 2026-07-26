@@ -111,10 +111,6 @@ export default function MovieGame() {
     };
   }, []);
 
-  useEffect(() => {
-    setHighScore(readHighScore(mode));
-  }, [mode]);
-
   function clearFeedbackTimeout() {
     if (feedbackTimeoutRef.current !== null) {
       window.clearTimeout(feedbackTimeoutRef.current);
@@ -157,6 +153,7 @@ export default function MovieGame() {
 
     setMode(gameMode);
     setScore(nextScore);
+    setHighScore(readHighScore(gameMode));
     setGameOver(false);
     setPair(nextPair);
     setUsedMovieKeys([]);
