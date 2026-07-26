@@ -7,7 +7,15 @@ import { useEffect, useRef, useState } from "react";
 import TournamentBracket from "@/components/tournament-bracket";
 import { loadMovies } from "@/lib/csv";
 import { getMovieKey } from "@/lib/movie-key";
-import { getCurrentMatch, getEntryById, getMatchVoteSummary, normalizeRoomCode } from "@/lib/tournament";
+import { TOURNAMENT_PRESETS } from "@/lib/tournament-presets";
+import {
+  getBracketSize,
+  getCurrentMatch,
+  getEntryById,
+  getMatchVoteSummary,
+  normalizeRoomCode,
+  orderEntriesBySeedSlots,
+} from "@/lib/tournament";
 import type { Movie } from "@/lib/types";
 import type { TournamentRoom } from "@/lib/tournament-types";
 
@@ -29,11 +37,13 @@ type TournamentMovieSelection = {
   year: number | null;
   posterUrl?: string;
   tmdbId?: number;
+  seed?: number;
 };
 
 type RemoteMovieResult = TournamentMovieSelection;
 
 type MovieSearchTab = "rated" | "all";
+type BracketSetupMode = "seeded" | "custom";
 
 type MovieSearchResponse = {
   movies?: RemoteMovieResult[];
@@ -59,6 +69,8 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
   const [selectedMovies, setSelectedMovies] = useState<TournamentMovieSelection[]>([]);
   const [loadingMovies, setLoadingMovies] = useState(true);
   const [joinCodeInput, setJoinCodeInput] = useState("");
+  const [loadingPresetId, setLoadingPresetId] = useState<string | null>(null);
+  const [setupMode, setSetupMode] = useState<BracketSetupMode>("seeded");
   const [isEditingName, setIsEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState(() => getStoredTournamentName());
   const [submitting, setSubmitting] = useState(false);
@@ -151,7 +163,7 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
   }, [movieSearchTab, movieSearchValue]);
 
   useEffect(() => {
-    if (!backendConfigured || !roomCode || !sessionId || !displayName.trim()) {
+    if (!backendConfigured || !roomCode || !sessionId) {
       return;
     }
 
@@ -161,10 +173,8 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
 
     joinAttemptedRoomCodeRef.current = roomCode;
 
-    void postRoomAction("/api/tournament/join", {
-      code: roomCode,
-      displayName,
-      sessionId,
+    void joinRoomWithResolvedName(roomCode, sessionId, displayName, {
+      onResolvedName: setDisplayName,
     })
       .then((nextRoom) => {
         setRoom(nextRoom);
@@ -248,6 +258,11 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
   const filteredRemoteMovies = remoteMovies.filter(
     (movie) => !selectedMovieKeys.has(getMovieSelectionKey(movie)),
   );
+  const selectedBracketSize = getBracketSize(selectedMovies.length);
+  const seededBracketMovies = selectedBracketSize
+    ? orderEntriesBySeedSlots(selectedMovies, selectedBracketSize)
+    : selectedMovies;
+  const bracketMovies = setupMode === "custom" ? selectedMovies : seededBracketMovies;
 
   let statusMessage = "Create a room or join one with a code.";
 
@@ -283,18 +298,20 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
     setError(null);
 
     try {
+      const resolvedDisplayName = displayName.trim() || "Player 1";
       const nextRoom = await postRoomAction("/api/tournament/create", {
         title: createTitle,
-        entries: selectedMovies.map((movie) => ({
+        entries: bracketMovies.map((movie) => ({
           label: movie.label,
           year: movie.year,
           posterUrl: movie.posterUrl,
           tmdbId: movie.tmdbId,
         })),
-        displayName,
+        displayName: resolvedDisplayName,
         sessionId,
       });
 
+      setDisplayName(resolvedDisplayName);
       navigateToRoom(nextRoom.code);
       joinAttemptedRoomCodeRef.current = nextRoom.code;
       setRoom(nextRoom);
@@ -317,11 +334,14 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
     setError(null);
 
     try {
-      const nextRoom = await postRoomAction("/api/tournament/join", {
-        code: joinCodeInput,
-        displayName,
+      const nextRoom = await joinRoomWithResolvedName(
+        joinCodeInput,
         sessionId,
-      });
+        displayName,
+        {
+          onResolvedName: setDisplayName,
+        }
+      );
 
       navigateToRoom(nextRoom.code);
       joinAttemptedRoomCodeRef.current = nextRoom.code;
@@ -344,6 +364,7 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
         label: movie.name,
         year: movie.year,
         posterUrl: movie.posterUrl,
+        seed: getNextSeed(currentMovies),
       },
     ]);
     setMovieSearch("");
@@ -355,7 +376,13 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
       return;
     }
 
-    setSelectedMovies((currentMovies) => [...currentMovies, movie]);
+    setSelectedMovies((currentMovies) => [
+      ...currentMovies,
+      {
+        ...movie,
+        seed: getNextSeed(currentMovies),
+      },
+    ]);
     setMovieSearch("");
     setRemoteMovies([]);
     setRemoteMoviesQuery("");
@@ -438,6 +465,72 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
     }
   }
 
+  async function handleLoadPreset(presetId: string) {
+    const preset = TOURNAMENT_PRESETS.find((entry) => entry.id === presetId);
+
+    if (!preset) {
+      return;
+    }
+
+    setLoadingPresetId(preset.id);
+    setError(null);
+
+    try {
+      const resolvedMovies = await Promise.all(
+        preset.entries.map((entry) => resolvePresetMovie(entry.label, entry.year, movies)),
+      );
+
+      setCreateTitle(preset.title);
+      setSetupMode("seeded");
+      setSelectedMovies(
+        resolvedMovies.map((movie, index) => ({
+          label: movie.label,
+          year: movie.year,
+          posterUrl: movie.posterUrl,
+          tmdbId: movie.tmdbId,
+          seed: preset.entries[index]?.seed,
+        })),
+      );
+      setMovieSearch("");
+      setRemoteMovies([]);
+      setRemoteMoviesQuery("");
+    } catch (presetError) {
+      setError(
+        presetError instanceof Error
+          ? presetError.message
+          : "Could not load that preset bracket.",
+      );
+    } finally {
+      setLoadingPresetId(null);
+    }
+  }
+
+  function handleSwitchSetupMode(nextMode: BracketSetupMode) {
+    if (nextMode === setupMode) {
+      return;
+    }
+
+    if (nextMode === "custom" && selectedBracketSize) {
+      setSelectedMovies(seededBracketMovies);
+    }
+
+    setSetupMode(nextMode);
+  }
+
+  function handleSwapMatchupSides(pairIndex: number) {
+    const leftIndex = pairIndex * 2;
+    const rightIndex = leftIndex + 1;
+
+    setSelectedMovies((currentMovies) => swapMovieIndices(currentMovies, leftIndex, rightIndex));
+  }
+
+  function handleMoveMovie(matchIndex: number, side: "left" | "right", direction: -1 | 1) {
+    const movieIndex = matchIndex * 2 + (side === "left" ? 0 : 1);
+    const nextIndex = movieIndex + direction;
+
+    setSelectedMovies((currentMovies) => swapMovieIndices(currentMovies, movieIndex, nextIndex));
+  }
+
   function navigateToRoom(nextRoomCode: string) {
     const params = new URLSearchParams(searchParams.toString());
     params.set("room", nextRoomCode);
@@ -512,6 +605,50 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
                 Create Room
               </p>
               <h3 className="mt-2 text-xl font-semibold text-white">Seed a bracket and become the host.</h3>
+            </div>
+
+            <div className="rounded-[1.35rem] border border-violet-300/12 bg-violet-400/6 p-3.5">
+              <div>
+                <p className="text-[10px] font-medium uppercase tracking-[0.18em] text-violet-200/75">
+                  Preset Brackets
+                </p>
+                <p className="mt-1 text-sm leading-6 text-slate-300">
+                  Load a fully seeded bracket instantly, then tweak any picks you want.
+                </p>
+              </div>
+
+              <div className="mt-3 grid gap-3 xl:grid-cols-2">
+                {TOURNAMENT_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    onClick={() => handleLoadPreset(preset.id)}
+                    disabled={loadingPresetId !== null}
+                    className="rounded-[1.2rem] border border-white/10 bg-slate-950/35 p-3 text-left transition hover:border-violet-300/35 hover:bg-white/7 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-semibold text-white">{preset.title}</p>
+                        <p className="mt-1 text-sm text-slate-400">{preset.description}</p>
+                      </div>
+                      <span className="rounded-full border border-white/10 bg-white/6 px-3 py-1 text-[10px] font-medium uppercase tracking-[0.18em] text-slate-300">
+                        {preset.entries.length} movies
+                      </span>
+                    </div>
+
+                    <p className="mt-3 text-xs text-slate-500">
+                      {preset.entries
+                        .slice(0, 4)
+                        .map((entry) => `#${entry.seed} ${entry.label}`)
+                        .join(" • ")}
+                    </p>
+
+                    <p className="mt-3 text-sm font-medium text-violet-200">
+                      {loadingPresetId === preset.id ? "Loading preset..." : "Load preset"}
+                    </p>
+                  </button>
+                ))}
+              </div>
             </div>
 
             <label className="block space-y-2 text-sm text-slate-200">
@@ -684,7 +821,10 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
                             size="sm"
                           />
                           <div className="min-w-0 flex-1">
-                            <p className="line-clamp-2 text-sm font-medium text-white">{movie.label}</p>
+                            <p className="line-clamp-2 text-sm font-medium text-white">
+                              {typeof movie.seed === "number" ? `#${movie.seed} ` : ""}
+                              {movie.label}
+                            </p>
                             <p className="mt-1 text-xs text-slate-400">{movie.year ?? "Unknown year"}</p>
                           </div>
                         </div>
@@ -704,6 +844,130 @@ export default function TournamentGame({ backendConfigured }: TournamentGameProp
                   </div>
                 )}
               </div>
+
+              {selectedBracketSize ? (
+                <div className="space-y-3 rounded-[1.35rem] border border-white/10 bg-slate-950/35 p-3">
+                  <div className="flex flex-wrap gap-2">
+                    {([
+                      ["seeded", "Seeded"],
+                      ["custom", "Custom Matchups"],
+                    ] as const).map(([modeId, label]) => {
+                      const isActive = setupMode === modeId;
+
+                      return (
+                        <button
+                          key={modeId}
+                          type="button"
+                          onClick={() => handleSwitchSetupMode(modeId)}
+                          className={`rounded-full px-3 py-1.5 text-sm font-semibold transition ${
+                            isActive
+                              ? "border border-violet-300/40 bg-violet-300/12 text-violet-100"
+                              : "border border-white/10 bg-slate-950/30 text-slate-300 hover:border-white/20 hover:bg-white/6"
+                          }`}
+                        >
+                          {label}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  <p className="text-sm leading-6 text-slate-400">
+                    {setupMode === "seeded"
+                      ? "Use standard tournament seeding so the top movies do not meet too early."
+                      : "Control first-round opponents directly. Every row below is one matchup."}
+                  </p>
+
+                  {setupMode === "seeded" ? (
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      {buildMatchupPairs(seededBracketMovies).map((pair, index) => (
+                        <div
+                          key={`seeded-pair-${index}`}
+                          className="rounded-[1rem] border border-white/8 bg-slate-950/35 px-3 py-2.5 text-sm text-slate-200"
+                        >
+                          <span className="font-medium text-white">
+                            Match {index + 1}
+                          </span>
+                          <span className="text-slate-400">: </span>
+                          {pair[0]
+                            ? `${typeof pair[0].seed === "number" ? `#${pair[0].seed} ` : ""}${pair[0].label}`
+                            : "TBD"}
+                          <span className="text-slate-500"> vs </span>
+                          {pair[1]
+                            ? `${typeof pair[1].seed === "number" ? `#${pair[1].seed} ` : ""}${pair[1].label}`
+                            : "TBD"}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {buildMatchupPairs(selectedMovies).map((pair, index) => (
+                        <div
+                          key={`custom-pair-${index}`}
+                          className="rounded-[1rem] border border-white/8 bg-slate-950/35 p-3"
+                        >
+                          <div className="mb-2 flex items-center justify-between gap-3">
+                            <p className="text-sm font-medium text-white">Match {index + 1}</p>
+                            <button
+                              type="button"
+                              onClick={() => handleSwapMatchupSides(index)}
+                              className="rounded-full border border-white/10 bg-slate-900/50 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-slate-300 transition hover:border-white/20 hover:bg-white/6 hover:text-white"
+                            >
+                              Swap Sides
+                            </button>
+                          </div>
+
+                          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center">
+                            {[pair[0], pair[1]].map((movie, movieIndex) => (
+                              <div
+                                key={`custom-pair-${index}-${movieIndex}`}
+                                className="rounded-[0.95rem] border border-white/8 bg-slate-950/45 p-2.5"
+                              >
+                                {movie ? (
+                                  <div className="flex items-center gap-3">
+                                    <PosterThumb title={movie.label} posterUrl={movie.posterUrl} size="sm" />
+                                    <div className="min-w-0 flex-1">
+                                      <p className="line-clamp-2 text-sm font-medium text-white">
+                                        {typeof movie.seed === "number" ? `#${movie.seed} ` : ""}
+                                        {movie.label}
+                                      </p>
+                                      <p className="mt-1 text-xs text-slate-400">{movie.year ?? "Unknown year"}</p>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <p className="text-sm text-slate-500">Empty slot</p>
+                                )}
+
+                                <div className="mt-3 flex gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveMovie(index, movieIndex === 0 ? "left" : "right", -1)}
+                                    disabled={index === 0 && movieIndex === 0}
+                                    className="rounded-full border border-white/10 bg-slate-900/50 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-slate-300 transition hover:border-white/20 hover:bg-white/6 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Earlier
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMoveMovie(index, movieIndex === 0 ? "left" : "right", 1)}
+                                    disabled={index === buildMatchupPairs(selectedMovies).length - 1 && movieIndex === 1}
+                                    className="rounded-full border border-white/10 bg-slate-900/50 px-3 py-1.5 text-xs font-medium uppercase tracking-[0.16em] text-slate-300 transition hover:border-white/20 hover:bg-white/6 hover:text-white disabled:cursor-not-allowed disabled:opacity-40"
+                                  >
+                                    Later
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+
+                            <div className="hidden text-center text-xs font-medium uppercase tracking-[0.16em] text-slate-500 sm:block">
+                              vs
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : null}
             </div>
 
             <p className="text-sm leading-6 text-slate-400">
@@ -1094,6 +1358,79 @@ function getMovieSelectionKey(movie: TournamentMovieSelection) {
   return movie.tmdbId ? `tmdb:${movie.tmdbId}` : getMovieKey(movie.label, movie.year);
 }
 
+async function resolvePresetMovie(label: string, year: number, movies: Movie[]) {
+  const localMovie = movies.find(
+    (movie) => movie.name === label && movie.year === year,
+  );
+
+  if (localMovie) {
+    return {
+      label: localMovie.name,
+      year: localMovie.year,
+      posterUrl: localMovie.posterUrl,
+    } satisfies TournamentMovieSelection;
+  }
+
+  const response = await fetch(`/api/movies/search?q=${encodeURIComponent(label)}`, {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as MovieSearchResponse;
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? `Could not load preset movie ${label}.`);
+  }
+
+  const exactMovie = (payload.movies ?? []).find(
+    (movie) => movie.label === label && movie.year === year,
+  );
+
+  if (!exactMovie) {
+    throw new Error(`Could not find ${label} (${year}) for the preset bracket.`);
+  }
+
+  return exactMovie;
+}
+
+function buildMatchupPairs(movies: TournamentMovieSelection[]) {
+  const pairs: Array<[TournamentMovieSelection | null, TournamentMovieSelection | null]> = [];
+
+  for (let index = 0; index < movies.length; index += 2) {
+    pairs.push([movies[index] ?? null, movies[index + 1] ?? null]);
+  }
+
+  return pairs;
+}
+
+function getNextSeed(movies: TournamentMovieSelection[]) {
+  return (
+    movies.reduce((highestSeed, movie) => Math.max(highestSeed, movie.seed ?? 0), 0) + 1
+  );
+}
+
+function swapMovieIndices(
+  movies: TournamentMovieSelection[],
+  leftIndex: number,
+  rightIndex: number,
+) {
+  if (
+    leftIndex < 0 ||
+    rightIndex < 0 ||
+    leftIndex >= movies.length ||
+    rightIndex >= movies.length ||
+    leftIndex === rightIndex
+  ) {
+    return movies;
+  }
+
+  const nextMovies = [...movies];
+  const leftMovie = nextMovies[leftIndex];
+
+  nextMovies[leftIndex] = nextMovies[rightIndex];
+  nextMovies[rightIndex] = leftMovie;
+
+  return nextMovies;
+}
+
 async function postRoomAction(url: string, body: Record<string, unknown>) {
   const response = await fetch(url, {
     method: "POST",
@@ -1109,4 +1446,63 @@ async function postRoomAction(url: string, body: Record<string, unknown>) {
   }
 
   return payload.room;
+}
+
+async function joinRoomWithResolvedName(
+  roomCode: string,
+  sessionId: string,
+  currentDisplayName: string,
+  options: {
+    onResolvedName: (name: string) => void;
+  },
+) {
+  const normalizedDisplayName = currentDisplayName.trim();
+  let resolvedDisplayName = normalizedDisplayName;
+
+  if (!resolvedDisplayName) {
+    const room = await fetchTournamentRoom(roomCode);
+    resolvedDisplayName = getNextDefaultPlayerName(room);
+    options.onResolvedName(resolvedDisplayName);
+  }
+
+  return postRoomAction("/api/tournament/join", {
+    code: roomCode,
+    displayName: resolvedDisplayName,
+    sessionId,
+  });
+}
+
+async function fetchTournamentRoom(roomCode: string) {
+  const response = await fetch(`/api/tournament/${roomCode}`, {
+    cache: "no-store",
+  });
+  const payload = (await response.json()) as ApiRoomResponse;
+
+  if (!response.ok || !payload.room) {
+    throw new Error(payload.error ?? "Could not load room.");
+  }
+
+  return payload.room;
+}
+
+function getNextDefaultPlayerName(room: TournamentRoom) {
+  const usedNames = new Set(
+    room.state.players.map((player) => player.name.trim().toLowerCase()),
+  );
+
+  for (let playerNumber = 1; playerNumber <= 6; playerNumber += 1) {
+    const nextName = `Player ${playerNumber}`;
+
+    if (!usedNames.has(nextName.toLowerCase())) {
+      return nextName;
+    }
+  }
+
+  let playerNumber = 7;
+
+  while (usedNames.has(`player ${playerNumber}`)) {
+    playerNumber += 1;
+  }
+
+  return `Player ${playerNumber}`;
 }

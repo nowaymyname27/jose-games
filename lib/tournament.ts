@@ -45,6 +45,32 @@ export function getBracketSize(entryCount: number): BracketSize | null {
   return VALID_BRACKET_SIZES.find((size) => size === entryCount) ?? null;
 }
 
+export function getSeedSlotOrder(bracketSize: BracketSize): number[] {
+  if (bracketSize === 4) {
+    return [1, 4, 2, 3];
+  }
+
+  if (bracketSize === 8) {
+    return [1, 8, 4, 5, 2, 7, 3, 6];
+  }
+
+  return [1, 16, 8, 9, 5, 12, 4, 13, 6, 11, 3, 14, 7, 10, 2, 15];
+}
+
+export function orderEntriesBySeedSlots<T extends { seed?: number }>(
+  entries: T[],
+  bracketSize: BracketSize,
+) {
+  const bySeed = [...entries].sort(
+    (left, right) => (left.seed ?? Number.MAX_SAFE_INTEGER) - (right.seed ?? Number.MAX_SAFE_INTEGER),
+  );
+  const sortedSeeds = getSeedSlotOrder(bracketSize);
+
+  return sortedSeeds
+    .map((seedNumber) => bySeed.find((entry) => entry.seed === seedNumber) ?? null)
+    .filter((entry): entry is T => entry !== null);
+}
+
 export function createRoomCode(length = 6): string {
   return Array.from({ length }, () => {
     const randomIndex = Math.floor(Math.random() * ROOM_CODE_ALPHABET.length);
