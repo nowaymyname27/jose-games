@@ -13,9 +13,9 @@ import type { D20Room, D20RoomState } from "@/lib/d20-types";
 
 const D20_ROOMS_TABLE = "d20_rooms" as const;
 const MAX_MUTATION_RETRIES = 5;
-const ROOM_INACTIVITY_WINDOW_MS = 30 * 60 * 1000;
+const ROOM_INACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
 const ROOM_EXPIRED_ERROR_MESSAGE =
-  "This room expired after 30 minutes of inactivity. Create a new one.";
+  "This room expired after 24 hours of inactivity. Create a new one.";
 
 type D20RoomRecord = {
   code: string;
@@ -154,6 +154,31 @@ export async function advanceD20RoomRound(input: {
   }
 
   return mutateD20Room(input.code, (state) => startNextD20Round(state, input.sessionId));
+}
+
+export async function closeD20Room(input: { code: string; sessionId: string }) {
+  const normalizedCode = normalizeRoomCode(input.code);
+
+  if (!normalizedCode) {
+    throw new Error("Enter a valid room code.");
+  }
+
+  if (!input.sessionId.trim()) {
+    throw new Error("Could not identify this browser session.");
+  }
+
+  const currentRoom = await getD20Room(normalizedCode);
+
+  if (currentRoom.state.hostSessionId !== input.sessionId) {
+    throw new Error("Only the host can do that.");
+  }
+
+  const supabase = getSupabaseServerClient();
+  const { error } = await supabase.from(D20_ROOMS_TABLE).delete().eq("code", normalizedCode);
+
+  if (error) {
+    throw new Error(error.message);
+  }
 }
 
 async function mutateD20Room(

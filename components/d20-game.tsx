@@ -20,6 +20,7 @@ type D20GameProps = {
 type ApiRoomResponse = {
   room?: D20Room;
   error?: string;
+  success?: boolean;
 };
 
 export default function D20Game({ backendConfigured }: D20GameProps) {
@@ -37,6 +38,7 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
   const [submitting, setSubmitting] = useState(false);
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -139,6 +141,7 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
   async function handleCreateRoom() {
     try {
       setSubmitting(true);
+      setStatusMessage(null);
       const nextDisplayName = normalizeDisplayName(displayName) || "Player 1";
       const nextRoom = await postRoomAction("/api/d20/create", {
         title: createTitle,
@@ -168,6 +171,7 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
 
     try {
       setSubmitting(true);
+      setStatusMessage(null);
       const nextRoom = await joinRoomWithResolvedName(nextRoomCode, sessionId, displayName, {
         onResolvedName: setDisplayName,
       });
@@ -190,6 +194,7 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
 
     try {
       setSubmitting(true);
+      setStatusMessage(null);
       const nextRoom = await joinRoomWithResolvedName(roomCode, sessionId, displayName, {
         onResolvedName: setDisplayName,
       });
@@ -237,9 +242,34 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
     }
   }
 
+  async function handleCloseRoom() {
+    if (!roomCode) {
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setStatusMessage(null);
+      await postAction(`/api/d20/${roomCode}/close`, {
+        sessionId,
+      });
+      setRoom(null);
+      setError(null);
+      setCopyStatus(null);
+      setStatusMessage("Room closed.");
+      clearRoomUrl();
+      joinAttemptedRoomCodeRef.current = null;
+    } catch (closeError) {
+      setError(closeError instanceof Error ? closeError.message : "Could not close room.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function runRoomMutation(url: string, body: Record<string, unknown>) {
     try {
       setSubmitting(true);
+      setStatusMessage(null);
       const nextRoom = await postRoomAction(url, body);
       setRoom(nextRoom);
       setError(null);
@@ -257,6 +287,13 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
     params.set("room", nextRoomCode);
     joinAttemptedRoomCodeRef.current = nextRoomCode;
     router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+  }
+
+  function clearRoomUrl() {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("room");
+    const nextQuery = params.toString();
+    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
   }
 
   if (!backendConfigured) {
@@ -291,6 +328,11 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
           {error ? (
             <p className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
               {error}
+            </p>
+          ) : null}
+          {statusMessage ? (
+            <p className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+              {statusMessage}
             </p>
           ) : null}
         </div>
@@ -389,19 +431,30 @@ export default function D20Game({ backendConfigured }: D20GameProps) {
               Copy Invite Link
             </button>
             {isHost ? (
-              <button
-                type="button"
-                onClick={handleNextRound}
-                disabled={submitting || currentRound?.status !== "complete"}
-                className="rounded-full bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                New Round
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleNextRound}
+                  disabled={submitting || currentRound?.status !== "complete"}
+                  className="rounded-full bg-emerald-300 px-4 py-2.5 text-sm font-semibold text-emerald-950 transition hover:bg-emerald-200 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  New Round
+                </button>
+                <button
+                  type="button"
+                  onClick={handleCloseRoom}
+                  disabled={submitting}
+                  className="rounded-full border border-rose-300/25 bg-rose-400/12 px-4 py-2.5 text-sm font-semibold text-rose-100 transition hover:border-rose-200/40 hover:bg-rose-400/16 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  Close Room
+                </button>
+              </>
             ) : null}
           </div>
         </div>
 
         {copyStatus ? <p className="mt-3 text-sm text-emerald-50/80">{copyStatus}</p> : null}
+        {statusMessage ? <p className="mt-3 text-sm text-emerald-50/80">{statusMessage}</p> : null}
         {error ? (
           <p className="mt-4 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
             {error}
@@ -569,6 +622,21 @@ async function postRoomAction(url: string, body: Record<string, unknown>) {
   }
 
   return payload.room;
+}
+
+async function postAction(url: string, body: Record<string, unknown>) {
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(body),
+  });
+  const payload = (await response.json()) as ApiRoomResponse;
+
+  if (!response.ok) {
+    throw new Error(payload.error ?? "Could not complete action.");
+  }
 }
 
 async function joinRoomWithResolvedName(
