@@ -17,6 +17,10 @@ const GAMES = [
     href: "/tournament",
     label: "Tournament Lobby",
   },
+  {
+    href: "/d20",
+    label: "D20 Roll Off",
+  },
 ];
 
 export default function SiteMenu() {
