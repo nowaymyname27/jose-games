@@ -21,6 +21,10 @@ const GAMES = [
     href: "/d20",
     label: "D20 Roll Off",
   },
+  {
+    href: "/blind-rank",
+    label: "Blind Rank",
+  },
 ];
 
 export default function SiteMenu() {
