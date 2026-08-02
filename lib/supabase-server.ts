@@ -2,6 +2,7 @@ import { createClient } from "@supabase/supabase-js";
 
 import type { BlindRankRoomState } from "@/lib/blind-rank-types";
 import type { D20RoomState } from "@/lib/d20-types";
+import type { GuessWhoRoomState } from "@/lib/guess-who-types";
 import type { TournamentRoomState } from "@/lib/tournament-types";
 
 type SupabaseDatabase = {
@@ -73,6 +74,30 @@ type SupabaseDatabase = {
         Update: {
           code?: string;
           state?: BlindRankRoomState;
+          version?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      guess_who_rooms: {
+        Row: {
+          code: string;
+          state: GuessWhoRoomState;
+          version: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          code: string;
+          state: GuessWhoRoomState;
+          version?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          code?: string;
+          state?: GuessWhoRoomState;
           version?: number;
           created_at?: string;
           updated_at?: string;

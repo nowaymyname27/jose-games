@@ -8,6 +8,7 @@ type GuessWhoCardProps = {
   isSelected: boolean;
   onToggleEliminated: () => void;
   onToggleSelected: () => void;
+  interactive?: boolean;
 };
 
 export default function GuessWhoCard({
@@ -16,6 +17,7 @@ export default function GuessWhoCard({
   isSelected,
   onToggleEliminated,
   onToggleSelected,
+  interactive = true,
 }: GuessWhoCardProps) {
   const initials = entry.name
     .split(" ")
@@ -33,10 +35,14 @@ export default function GuessWhoCard({
 
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={onToggleEliminated}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? onToggleEliminated : undefined}
       onKeyDown={(event) => {
+        if (!interactive) {
+          return;
+        }
+
         if (event.key === "Enter" || event.key === " ") {
           event.preventDefault();
           onToggleEliminated();
@@ -67,21 +73,23 @@ export default function GuessWhoCard({
 
         <div className="pointer-events-none absolute inset-x-0 bottom-0 h-16 bg-linear-to-t from-slate-950/70 to-transparent" />
 
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onToggleSelected();
-          }}
-          className={`absolute right-2 top-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] backdrop-blur-sm transition sm:right-3 sm:top-3 ${
-            isSelected
-              ? "border-red-300/70 bg-red-500/90 text-white"
-              : "border-white/12 bg-slate-950/75 text-slate-200 hover:border-red-500/40"
-          }`}
-          aria-pressed={isSelected}
-        >
-          {isSelected ? "My Pick" : "Pick"}
-        </button>
+        {interactive ? (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleSelected();
+            }}
+            className={`absolute right-2 top-2 rounded-full border px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] backdrop-blur-sm transition sm:right-3 sm:top-3 ${
+              isSelected
+                ? "border-red-300/70 bg-red-500/90 text-white"
+                : "border-white/12 bg-slate-950/75 text-slate-200 hover:border-red-500/40"
+            }`}
+            aria-pressed={isSelected}
+          >
+            {isSelected ? "My Pick" : "Pick"}
+          </button>
+        ) : null}
 
         {state === "eliminated" ? (
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center bg-slate-950/45">
@@ -99,7 +107,7 @@ export default function GuessWhoCard({
         </div>
 
         <span className="text-[10px] font-medium text-slate-400 transition group-hover:text-white">
-          {state === "eliminated" ? "Undo" : "Cross off"}
+          {interactive ? (state === "eliminated" ? "Undo" : "Cross off") : "Viewing"}
         </span>
       </div>
     </div>

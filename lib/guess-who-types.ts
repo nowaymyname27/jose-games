@@ -22,3 +22,34 @@ export type GuessWhoCatalog = {
   defaultCategoryId: GuessWhoCategoryId;
   entriesByCategory: Record<GuessWhoCategoryId, GuessWhoEntry[]>;
 };
+
+export type GuessWhoPlayerRole = "player" | "spectator";
+
+export type GuessWhoRoomPlayer = {
+  sessionId: string;
+  name: string;
+  isHost: boolean;
+  role: GuessWhoPlayerRole;
+  seat: 1 | 2 | null;
+  joinedAt: string;
+  lastSeenAt: string;
+};
+
+export type GuessWhoRoomState = {
+  title: string;
+  hostSessionId: string;
+  categoryId: GuessWhoCategoryId;
+  boardSize: number;
+  seed: string;
+  players: GuessWhoRoomPlayer[];
+  status: "open";
+  createdAt: string;
+};
+
+export type GuessWhoRoom = {
+  code: string;
+  version: number;
+  createdAt: string;
+  updatedAt: string;
+  state: GuessWhoRoomState;
+};
