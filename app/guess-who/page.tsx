@@ -25,12 +25,12 @@ export default function GuessWhoPage() {
               Guess Who?
             </h1>
             <p className="max-w-3xl text-sm leading-6 text-slate-300 sm:text-base">
-              Choose a category, generate the same board with a shared seed, keep your secret pick private, and now run host-controlled multiplayer rooms with spectator support.
+              Open a room, lock in one board for everyone, keep each player&apos;s secret pick private, and let extra people spectate live.
             </p>
           </div>
 
           <p className="max-w-sm text-sm leading-6 text-slate-400 lg:text-right">
-            Shared seed practice locally, or open a room so two players can play while everyone else watches.
+            Two active players, host-controlled setup, and spectator support without the old seed-link flow.
           </p>
         </div>
       </div>

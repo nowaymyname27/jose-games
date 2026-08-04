@@ -5,11 +5,9 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import GuessWhoCard from "@/components/guess-who-card";
-import GuessWhoControls from "@/components/guess-who-controls";
 import {
   buildGuessWhoBoard,
   createRandomSeed,
-  getDefaultBoardSize,
   getBoardSizeOptions,
   isGuessWhoCategory,
   normalizeDisplayName,
@@ -19,9 +17,9 @@ import {
 import type {
   GuessWhoCatalog,
   GuessWhoCategory,
+  GuessWhoEntry,
   GuessWhoRoom,
 } from "@/lib/guess-who-types";
-import { normalizeSeed } from "@/lib/seeded-random";
 
 const PLAYER_NAME_STORAGE_KEY = "jose-games-guess-who-name";
 const PLAYER_SESSION_STORAGE_KEY = "jose-games-guess-who-session";
@@ -38,30 +36,17 @@ type ApiRoomResponse = {
   success?: boolean;
 };
 
-type GuessWhoLocalState = {
+type GuessWhoPrivateState = {
   boardKey: string;
-  draftCategoryId: GuessWhoCategory["id"];
-  draftSize: number;
-  draftSeed: string;
   eliminatedIds: string[];
   selectedId: string | null;
-  copyStatus: string | null;
 };
 
-function createGuessWhoLocalState(
-  boardKey: string,
-  categoryId: GuessWhoCategory["id"],
-  boardSize: number,
-  boardSeed: string,
-): GuessWhoLocalState {
+function createPrivateState(boardKey: string): GuessWhoPrivateState {
   return {
     boardKey,
-    draftCategoryId: categoryId,
-    draftSize: boardSize,
-    draftSeed: boardSeed,
     eliminatedIds: [],
     selectedId: null,
-    copyStatus: null,
   };
 }
 
@@ -72,15 +57,18 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
   const roomCode = normalizeRoomCode(searchParams.get("room"));
   const joinAttemptedRoomCodeRef = useRef<string | null>(null);
 
-  const requestedCategory = searchParams.get("category");
-  const localCategoryId: GuessWhoCategory["id"] = isGuessWhoCategory(requestedCategory, catalog.categories)
-    ? requestedCategory
-    : catalog.defaultCategoryId;
-
   const [sessionId] = useState(() => getOrCreateGuessWhoSessionId());
   const [displayName, setDisplayName] = useState(() => getStoredGuessWhoName());
   const [room, setRoom] = useState<GuessWhoRoom | null>(null);
   const [createTitle, setCreateTitle] = useState("Guess Who Room");
+  const [createCategoryId, setCreateCategoryId] = useState<GuessWhoCategory["id"]>(
+    catalog.defaultCategoryId,
+  );
+  const [createSize, setCreateSize] = useState(() => {
+    const defaultEntries = catalog.entriesByCategory[catalog.defaultCategoryId] ?? [];
+    return parseBoardSize("24", defaultEntries.length);
+  });
+  const [createSeed, setCreateSeed] = useState(() => createRandomSeed());
   const [joinCodeInput, setJoinCodeInput] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [roomCopyStatus, setRoomCopyStatus] = useState<string | null>(null);
@@ -164,7 +152,10 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
 
   const activeRoom = room?.code === roomCode ? room : null;
   const roomState = activeRoom?.state ?? null;
-  const boardCategoryId = roomState?.categoryId ?? localCategoryId;
+  const previewCategoryId = isGuessWhoCategory(createCategoryId, catalog.categories)
+    ? createCategoryId
+    : catalog.defaultCategoryId;
+  const boardCategoryId = roomState?.categoryId ?? previewCategoryId;
   const category =
     catalog.categories.find((entry) => entry.id === boardCategoryId) ?? catalog.categories[0];
   const categoryEntries = useMemo(
@@ -174,28 +165,23 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
   const sizeOptions = getBoardSizeOptions(categoryEntries.length);
   const activeSize = roomState
     ? parseBoardSize(String(roomState.boardSize), categoryEntries.length)
-    : parseBoardSize(searchParams.get("size"), categoryEntries.length);
-  const activeSeed = roomState
-    ? normalizeSeed(roomState.seed)
-    : normalizeSeed(searchParams.get("seed"));
+    : parseBoardSize(String(createSize), categoryEntries.length);
+  const activeSeed = roomState?.seed ?? createSeed;
   const board = useMemo(
     () => buildGuessWhoBoard(category.id, categoryEntries, activeSeed, activeSize),
     [activeSeed, activeSize, category.id, categoryEntries],
   );
-  const boardKeyPrefix = roomState && activeRoom ? `room:${activeRoom.code}:${sessionId}` : "local";
-  const boardKey = `${boardKeyPrefix}:${category.id}:${board.size}:${board.seed}`;
-  const fallbackLocalState = createGuessWhoLocalState(
-    boardKey,
-    category.id,
-    board.size,
-    board.seed,
-  );
-  const [localState, setLocalState] = useState<GuessWhoLocalState>(fallbackLocalState);
-  const activeLocalState = localState.boardKey === boardKey ? localState : fallbackLocalState;
+  const boardKey = roomState && activeRoom
+    ? `room:${activeRoom.code}:${sessionId}:${category.id}:${board.size}:${board.seed}`
+    : `preview:${category.id}:${board.size}:${board.seed}`;
+  const fallbackPrivateState = createPrivateState(boardKey);
+  const [privateState, setPrivateState] = useState<GuessWhoPrivateState>(fallbackPrivateState);
+  const activePrivateState =
+    privateState.boardKey === boardKey ? privateState : fallbackPrivateState;
   const currentUser = roomState?.players.find((player) => player.sessionId === sessionId) ?? null;
   const isHost = currentUser?.isHost ?? false;
   const isSpectator = roomState ? currentUser?.role !== "player" : false;
-  const canInteractWithBoard = !roomState || !isSpectator;
+  const canInteractWithBoard = Boolean(roomState) && !isSpectator;
   const sortedPlayers = [...(roomState?.players ?? [])].sort((left, right) => {
     if (left.role !== right.role) {
       return left.role === "player" ? -1 : 1;
@@ -213,21 +199,9 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
   });
   const playerCount = sortedPlayers.filter((player) => player.role === "player").length;
   const spectatorCount = sortedPlayers.length - playerCount;
-  const activeCount = board.entries.length - activeLocalState.eliminatedIds.length;
+  const activeCount = board.entries.length - activePrivateState.eliminatedIds.length;
   const selectedEntry =
-    board.entries.find((entry) => entry.id === activeLocalState.selectedId) ?? null;
-
-  useEffect(() => {
-    if (roomCode || categoryEntries.length === 0 || searchParams.get("seed")) {
-      return;
-    }
-
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("category", catalog.defaultCategoryId);
-    params.set("size", String(getDefaultBoardSize(categoryEntries.length)));
-    params.set("seed", createRandomSeed());
-    router.replace(`${pathname}?${params.toString()}`);
-  }, [catalog.defaultCategoryId, categoryEntries.length, pathname, roomCode, router, searchParams]);
+    board.entries.find((entry) => entry.id === activePrivateState.selectedId) ?? null;
 
   if (categoryEntries.length < 2) {
     return (
@@ -246,7 +220,7 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
       <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="flex flex-wrap gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-slate-500">
           <span className="rounded-full border border-red-950/60 bg-[#12080a] px-3 py-1.5 text-slate-300">
-            Seed: {board.seed}
+            {category.label}
           </span>
           <span className="rounded-full border border-red-950/60 bg-[#12080a] px-3 py-1.5 text-slate-300">
             {board.size} Characters
@@ -255,7 +229,11 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
             <span className="rounded-full border border-red-950/60 bg-[#12080a] px-3 py-1.5 text-red-100">
               Room {activeRoom?.code ?? roomCode}
             </span>
-          ) : null}
+          ) : (
+            <span className="rounded-full border border-red-950/60 bg-[#12080a] px-3 py-1.5 text-slate-300">
+              Room Setup Preview
+            </span>
+          )}
         </div>
       </div>
 
@@ -275,149 +253,46 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
           submitting={submitting}
         />
       ) : backendConfigured ? (
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <section className="rounded-[1.2rem] border border-white/10 bg-slate-950/60 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.24)] sm:p-6">
-            <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-red-200/80">
-              Multiplayer Rooms
-            </p>
-            <h2 className="mt-2 text-2xl font-semibold text-white">Create a shared board for two players.</h2>
-            <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-              The host locks in one category, one size, and one seed. The first two people to join become players. Everyone else can spectate.
-            </p>
-            {roomCode && !roomState && !error ? (
-              <p className="mt-3 text-sm text-red-200/85">Joining room `{roomCode}`...</p>
-            ) : null}
-            {error ? (
-              <p className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
-                {error}
-              </p>
-            ) : null}
-            {statusMessage ? (
-              <p className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
-                {statusMessage}
-              </p>
-            ) : null}
-          </section>
-
-          <section className="rounded-[1.2rem] border border-red-950/60 bg-[#12080a] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-6">
-            <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-slate-500">
-              Room Setup
-            </p>
-            <div className="mt-4 space-y-4">
-              <label className="block text-sm text-slate-300">
-                Display name
-                <input
-                  value={displayName}
-                  onChange={(event) => setDisplayName(event.target.value)}
-                  placeholder="Player 1"
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-red-400/40"
-                />
-              </label>
-              <label className="block text-sm text-slate-300">
-                Room title
-                <input
-                  value={createTitle}
-                  onChange={(event) => setCreateTitle(event.target.value)}
-                  placeholder="Guess Who Room"
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-red-400/40"
-                />
-              </label>
-
-              <div className="rounded-[1rem] border border-red-950/60 bg-[#170a0c] p-4">
-                <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-red-200/80">
-                  Board That Will Be Shared
-                </p>
-                <p className="mt-2 text-lg font-semibold text-white">{category.label}</p>
-                <p className="mt-1 text-sm text-slate-400">
-                  {board.size} characters, seed `{board.seed}`
-                </p>
-              </div>
-
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <button
-                  type="button"
-                  onClick={() => void handleCreateRoom()}
-                  disabled={submitting}
-                  className="rounded-full bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Create Room
-                </button>
-                <input
-                  value={joinCodeInput}
-                  onChange={(event) => setJoinCodeInput(event.target.value)}
-                  placeholder="Enter room code"
-                  className="min-w-0 flex-1 rounded-full border border-red-950/60 bg-[#190b0d] px-4 py-3 text-sm font-medium uppercase tracking-[0.18em] text-white outline-none transition placeholder:text-slate-600 focus:border-red-500/60"
-                />
-                <button
-                  type="button"
-                  onClick={() => void handleJoinRoom()}
-                  disabled={submitting}
-                  className="rounded-full border border-red-900/60 bg-[#190b0d] px-5 py-3 text-sm font-medium text-slate-100 transition hover:border-red-700/70 hover:bg-[#241012] disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  Join Room
-                </button>
-              </div>
-            </div>
-          </section>
-        </div>
+        <LobbyCard
+          displayName={displayName}
+          createTitle={createTitle}
+          createCategoryId={createCategoryId}
+          createSize={createSize}
+          categoryOptions={catalog.categories}
+          sizeOptions={sizeOptions}
+          currentCategoryLabel={category.label}
+          joinCodeInput={joinCodeInput}
+          submitting={submitting}
+          error={error}
+          statusMessage={statusMessage}
+          onDisplayNameChange={setDisplayName}
+          onCreateTitleChange={setCreateTitle}
+          onCreateCategoryChange={(nextCategoryId) => {
+            const nextEntries = catalog.entriesByCategory[nextCategoryId] ?? [];
+            setCreateCategoryId(nextCategoryId);
+            setCreateSize(parseBoardSize(String(createSize), nextEntries.length));
+            setCreateSeed(createRandomSeed());
+          }}
+          onCreateSizeChange={(nextSize) => {
+            setCreateSize(nextSize);
+            setCreateSeed(createRandomSeed());
+          }}
+          onJoinCodeInputChange={setJoinCodeInput}
+          onCreateRoom={() => void handleCreateRoom()}
+          onJoinRoom={() => void handleJoinRoom()}
+        />
       ) : (
         <div className="rounded-[1.1rem] border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-100">
-          Guess Who local mode is available now. Multiplayer rooms unlock after Supabase is configured.
+          Guess Who rooms need Supabase before they can go live.
         </div>
       )}
-
-      {!roomState ? (
-        <GuessWhoControls
-          categoryOptions={catalog.categories}
-          draftCategoryId={activeLocalState.draftCategoryId}
-          sizeOptions={sizeOptions}
-          draftSize={activeLocalState.draftSize}
-          draftSeed={activeLocalState.draftSeed}
-          onDraftCategoryChange={(nextCategoryId) => {
-            const nextEntries = catalog.entriesByCategory[nextCategoryId] ?? [];
-            const nextSize = parseBoardSize(String(activeLocalState.draftSize), nextEntries.length);
-
-            setLocalState((currentState) => ({
-              ...resolveLocalState(currentState, fallbackLocalState),
-              draftCategoryId: nextCategoryId,
-              draftSize: nextSize,
-            }));
-          }}
-          onDraftSizeChange={(nextSize) => {
-            setLocalState((currentState) => ({
-              ...resolveLocalState(currentState, fallbackLocalState),
-              draftSize: nextSize,
-            }));
-          }}
-          onDraftSeedChange={(nextSeed) => {
-            setLocalState((currentState) => ({
-              ...resolveLocalState(currentState, fallbackLocalState),
-              draftSeed: nextSeed,
-            }));
-          }}
-          onRandomizeSeed={() => {
-            setLocalState((currentState) => ({
-              ...resolveLocalState(currentState, fallbackLocalState),
-              draftSeed: createRandomSeed(),
-            }));
-          }}
-          onLoadBoard={() =>
-            updateBoardParams(
-              activeLocalState.draftCategoryId,
-              activeLocalState.draftSize,
-              activeLocalState.draftSeed,
-            )
-          }
-          onCopyLink={handleCopyLocalBoardLink}
-          copyStatus={activeLocalState.copyStatus}
-        />
-      ) : null}
 
       <div className="grid gap-4 xl:grid-cols-[320px_minmax(0,1fr)]">
         <SecretPickCard
           selectedEntry={selectedEntry}
           canInteract={canInteractWithBoard}
           isSpectator={isSpectator}
+          inRoom={Boolean(roomState)}
           onRandomPick={handleRandomPick}
           onClearSelection={handleClearSelection}
         />
@@ -425,7 +300,7 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
         {roomState ? (
           <PlayersCard players={sortedPlayers} sessionId={sessionId} />
         ) : (
-          <LocalModeSummaryCard />
+          <PreviewCard categoryLabel={category.label} boardSize={board.size} />
         )}
       </div>
 
@@ -443,15 +318,21 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
               <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-slate-500 sm:text-xs">
                 Crossed Off
               </p>
-              <p className="mt-1 text-2xl font-semibold text-white">{activeLocalState.eliminatedIds.length}</p>
+              <p className="mt-1 text-2xl font-semibold text-white">{activePrivateState.eliminatedIds.length}</p>
             </div>
 
             <div className="bg-[#12080a] px-4 py-3.5">
               <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-slate-500 sm:text-xs">
-                {roomState ? (isSpectator ? "Room View" : "Your Secret Character") : "Secret Character"}
+                {roomState ? (isSpectator ? "Room View" : "Your Secret Character") : "Room Status"}
               </p>
               <p className="mt-1 truncate text-lg font-semibold text-white sm:text-xl">
-                {isSpectator ? "Spectator board only" : selectedEntry ? selectedEntry.name : "Not picked yet"}
+                {roomState
+                  ? isSpectator
+                    ? "Spectator board only"
+                    : selectedEntry
+                      ? selectedEntry.name
+                      : "Not picked yet"
+                  : "Create or join a room to start playing"}
               </p>
             </div>
 
@@ -465,7 +346,9 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
                   Reset Marks
                 </button>
               ) : (
-                <span className="text-sm text-slate-400">Read-only spectator board</span>
+                <span className="text-sm text-slate-400">
+                  {roomState ? "Read-only spectator board" : "Preview only until a room opens"}
+                </span>
               )}
             </div>
           </div>
@@ -479,14 +362,14 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
             <h2 className="mt-1 text-lg font-semibold text-white sm:text-xl">
               {roomState
                 ? "The room shares one board. Only active players can privately mark it on their own device."
-                : "Cross off characters as your questions narrow the board."}
+                : "This preview becomes the room board once the host creates the room."}
             </h2>
           </div>
 
           <p className="max-w-xl text-sm leading-6 text-slate-400">
             {roomState
-              ? "Everyone sees the same tile order from the room seed. Secret picks and marks stay private for the two active players."
-              : "Every player using this same seed sees the same tile order. Mark cards locally as the questions eliminate possibilities."}
+              ? "Everyone sees the same tile order from the room board. Secret picks and marks stay private for the two active players."
+              : "Pick the category and board size here. The room will lock those settings when the host creates it."}
           </p>
         </div>
 
@@ -495,8 +378,8 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
             <GuessWhoCard
               key={entry.id}
               entry={entry}
-              state={activeLocalState.eliminatedIds.includes(entry.id) ? "eliminated" : "active"}
-              isSelected={activeLocalState.selectedId === entry.id}
+              state={activePrivateState.eliminatedIds.includes(entry.id) ? "eliminated" : "active"}
+              isSelected={activePrivateState.selectedId === entry.id}
               onToggleEliminated={() => handleToggleEliminated(entry.id)}
               onToggleSelected={() => handleToggleSelected(entry.id)}
               interactive={canInteractWithBoard}
@@ -507,33 +390,13 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
     </div>
   );
 
-  function updateBoardParams(nextCategoryId: GuessWhoCategory["id"], nextSize: number, nextSeed: string) {
-    const params = new URLSearchParams(searchParams.toString());
-
-    params.set("category", nextCategoryId);
-    params.set("size", String(nextSize));
-    params.set("seed", normalizeSeed(nextSeed));
-    router.replace(`${pathname}?${params.toString()}`);
-  }
-
-  function handleCopyLocalBoardLink() {
-    const shareUrl = `${window.location.origin}${pathname}?category=${category.id}&size=${board.size}&seed=${board.seed}`;
-
-    void navigator.clipboard.writeText(shareUrl).then(() => {
-      setLocalState((currentState) => ({
-        ...resolveLocalState(currentState, fallbackLocalState),
-        copyStatus: "Share link copied.",
-      }));
-    });
-  }
-
   function handleToggleEliminated(entryId: string) {
     if (!canInteractWithBoard) {
       return;
     }
 
-    setLocalState((currentState) => {
-      const resolvedState = resolveLocalState(currentState, fallbackLocalState);
+    setPrivateState((currentState) => {
+      const resolvedState = resolvePrivateState(currentState, fallbackPrivateState);
       const isEliminated = resolvedState.eliminatedIds.includes(entryId);
 
       return {
@@ -550,8 +413,8 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
       return;
     }
 
-    setLocalState((currentState) => {
-      const resolvedState = resolveLocalState(currentState, fallbackLocalState);
+    setPrivateState((currentState) => {
+      const resolvedState = resolvePrivateState(currentState, fallbackPrivateState);
 
       return {
         ...resolvedState,
@@ -566,8 +429,8 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
     }
 
     const randomEntry = board.entries[Math.floor(Math.random() * board.entries.length)];
-    setLocalState((currentState) => ({
-      ...resolveLocalState(currentState, fallbackLocalState),
+    setPrivateState((currentState) => ({
+      ...resolvePrivateState(currentState, fallbackPrivateState),
       selectedId: randomEntry.id,
     }));
   }
@@ -577,8 +440,8 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
       return;
     }
 
-    setLocalState((currentState) => ({
-      ...resolveLocalState(currentState, fallbackLocalState),
+    setPrivateState((currentState) => ({
+      ...resolvePrivateState(currentState, fallbackPrivateState),
       selectedId: null,
     }));
   }
@@ -588,8 +451,8 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
       return;
     }
 
-    setLocalState((currentState) => ({
-      ...resolveLocalState(currentState, fallbackLocalState),
+    setPrivateState((currentState) => ({
+      ...resolvePrivateState(currentState, fallbackPrivateState),
       eliminatedIds: [],
       selectedId: null,
     }));
@@ -605,9 +468,9 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
         title: createTitle,
         displayName: nextDisplayName,
         sessionId,
-        categoryId: activeLocalState.draftCategoryId,
-        boardSize: activeLocalState.draftSize,
-        seed: activeLocalState.draftSeed,
+        categoryId: createCategoryId,
+        boardSize: createSize,
+        seed: createSeed,
       });
 
       setDisplayName(nextDisplayName);
@@ -711,6 +574,161 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
   }
 }
 
+function LobbyCard({
+  displayName,
+  createTitle,
+  createCategoryId,
+  createSize,
+  categoryOptions,
+  sizeOptions,
+  currentCategoryLabel,
+  joinCodeInput,
+  submitting,
+  error,
+  statusMessage,
+  onDisplayNameChange,
+  onCreateTitleChange,
+  onCreateCategoryChange,
+  onCreateSizeChange,
+  onJoinCodeInputChange,
+  onCreateRoom,
+  onJoinRoom,
+}: {
+  displayName: string;
+  createTitle: string;
+  createCategoryId: GuessWhoCategory["id"];
+  createSize: number;
+  categoryOptions: GuessWhoCategory[];
+  sizeOptions: number[];
+  currentCategoryLabel: string;
+  joinCodeInput: string;
+  submitting: boolean;
+  error: string | null;
+  statusMessage: string | null;
+  onDisplayNameChange: (value: string) => void;
+  onCreateTitleChange: (value: string) => void;
+  onCreateCategoryChange: (value: GuessWhoCategory["id"]) => void;
+  onCreateSizeChange: (value: number) => void;
+  onJoinCodeInputChange: (value: string) => void;
+  onCreateRoom: () => void;
+  onJoinRoom: () => void;
+}) {
+  return (
+    <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
+      <section className="rounded-[1.2rem] border border-white/10 bg-slate-950/60 p-5 shadow-[0_20px_60px_rgba(0,0,0,0.24)] sm:p-6">
+        <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-red-200/80">
+          Multiplayer Rooms
+        </p>
+        <h2 className="mt-2 text-2xl font-semibold text-white">Guess Who is room-only now.</h2>
+        <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
+          The host locks in one category and one board size for the room. The first two people to join become players. Everyone else can spectate.
+        </p>
+        {error ? (
+          <p className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-400/10 px-4 py-3 text-sm text-rose-100">
+            {error}
+          </p>
+        ) : null}
+        {statusMessage ? (
+          <p className="mt-3 rounded-2xl border border-emerald-400/20 bg-emerald-400/10 px-4 py-3 text-sm text-emerald-100">
+            {statusMessage}
+          </p>
+        ) : null}
+      </section>
+
+      <section className="rounded-[1.2rem] border border-red-950/60 bg-[#12080a] p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-6">
+        <p className="text-[11px] font-medium uppercase tracking-[0.24em] text-slate-500">
+          Room Setup
+        </p>
+        <div className="mt-4 space-y-4">
+          <label className="block text-sm text-slate-300">
+            Display name
+            <input
+              value={displayName}
+              onChange={(event) => onDisplayNameChange(event.target.value)}
+              placeholder="Player 1"
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-red-400/40"
+            />
+          </label>
+          <label className="block text-sm text-slate-300">
+            Room title
+            <input
+              value={createTitle}
+              onChange={(event) => onCreateTitleChange(event.target.value)}
+              placeholder="Guess Who Room"
+              className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-red-400/40"
+            />
+          </label>
+
+          <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
+            <label className="block text-sm text-slate-300">
+              Category
+              <select
+                value={createCategoryId}
+                onChange={(event) => onCreateCategoryChange(event.target.value as GuessWhoCategory["id"])}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition focus:border-red-400/40"
+              >
+                {categoryOptions.map((categoryOption) => (
+                  <option key={categoryOption.id} value={categoryOption.id}>
+                    {categoryOption.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="block text-sm text-slate-300">
+              Board size
+              <select
+                value={createSize}
+                onChange={(event) => onCreateSizeChange(Number(event.target.value))}
+                className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition focus:border-red-400/40"
+              >
+                {sizeOptions.map((sizeOption) => (
+                  <option key={sizeOption} value={sizeOption}>
+                    {sizeOption} characters
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="rounded-[1rem] border border-red-950/60 bg-[#170a0c] p-4">
+            <p className="text-[11px] font-medium uppercase tracking-[0.2em] text-red-200/80">
+              Board That Will Be Shared
+            </p>
+            <p className="mt-2 text-lg font-semibold text-white">{currentCategoryLabel}</p>
+            <p className="mt-1 text-sm text-slate-400">{createSize} characters</p>
+          </div>
+
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={onCreateRoom}
+              disabled={submitting}
+              className="rounded-full bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Create Room
+            </button>
+            <input
+              value={joinCodeInput}
+              onChange={(event) => onJoinCodeInputChange(event.target.value)}
+              placeholder="Enter room code"
+              className="min-w-0 flex-1 rounded-full border border-red-950/60 bg-[#190b0d] px-4 py-3 text-sm font-medium uppercase tracking-[0.18em] text-white outline-none transition placeholder:text-slate-600 focus:border-red-500/60"
+            />
+            <button
+              type="button"
+              onClick={onJoinRoom}
+              disabled={submitting}
+              className="rounded-full border border-red-900/60 bg-[#190b0d] px-5 py-3 text-sm font-medium text-slate-100 transition hover:border-red-700/70 hover:bg-[#241012] disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Join Room
+            </button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function RoomSummaryCard({
   room,
   categoryLabel,
@@ -795,12 +813,14 @@ function SecretPickCard({
   selectedEntry,
   canInteract,
   isSpectator,
+  inRoom,
   onRandomPick,
   onClearSelection,
 }: {
-  selectedEntry: GuessWhoCatalog["entriesByCategory"][string][number] | null;
+  selectedEntry: GuessWhoEntry | null;
   canInteract: boolean;
   isSpectator: boolean;
+  inRoom: boolean;
   onRandomPick: () => void;
   onClearSelection: () => void;
 }) {
@@ -809,10 +829,16 @@ function SecretPickCard({
       <div className="mb-3 flex items-center justify-between gap-3">
         <div>
           <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-slate-500 sm:text-xs">
-            {isSpectator ? "Spectator View" : "Your Character"}
+            {isSpectator ? "Spectator View" : inRoom ? "Your Character" : "Private Slot"}
           </p>
           <h2 className="mt-1 text-lg font-semibold text-white sm:text-xl">
-            {isSpectator ? "Watching the shared board" : selectedEntry ? selectedEntry.name : "No character selected"}
+            {isSpectator
+              ? "Watching the shared board"
+              : selectedEntry
+                ? selectedEntry.name
+                : inRoom
+                  ? "No character selected"
+                  : "Opens after you join a room"}
           </h2>
         </div>
 
@@ -857,12 +883,14 @@ function SecretPickCard({
             <div className="flex h-full items-center justify-center bg-linear-to-br from-[#13080a] via-[#1d0b0f] to-[#12080a] px-6 text-center">
               <div>
                 <p className="text-sm font-medium uppercase tracking-[0.24em] text-slate-500">
-                  {isSpectator ? "No Private Pick" : "Secret Pick Empty"}
+                  {isSpectator ? "No Private Pick" : inRoom ? "Secret Pick Empty" : "Waiting For Room"}
                 </p>
                 <p className="mt-3 max-w-xs text-sm leading-6 text-slate-300">
                   {isSpectator
                     ? "Spectators do not get a private character. Watch the room and follow the board."
-                    : "Use `Random Pick` to let the game choose for you, or tap `Pick` on any tile."}
+                    : inRoom
+                      ? "Use `Random Pick` to let the game choose for you, or tap `Pick` on any tile."
+                      : "Create or join a room first. Private marks and secret picks only exist inside active rooms."}
                 </p>
               </div>
             </div>
@@ -876,14 +904,18 @@ function SecretPickCard({
                 ? "Spectators cannot set a secret character"
                 : selectedEntry
                   ? selectedEntry.name
-                  : "Waiting for selection"}
+                  : inRoom
+                    ? "Waiting for selection"
+                    : "Room not active yet"}
             </p>
             <p className="mt-1 text-[10px] font-medium uppercase tracking-[0.22em] text-slate-500">
               {isSpectator
                 ? "Shared board, no private actions"
                 : selectedEntry
                   ? "Private character for the round"
-                  : "Choose one manually or randomize"}
+                  : inRoom
+                    ? "Choose one manually or randomize"
+                    : "Preview only"}
             </p>
           </div>
 
@@ -966,18 +998,22 @@ function PlayersCard({
   );
 }
 
-function LocalModeSummaryCard() {
+function PreviewCard({ categoryLabel, boardSize }: { categoryLabel: string; boardSize: number }) {
   return (
     <section className="rounded-[1.1rem] border border-red-950/70 bg-[#12080a] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-5">
       <p className="text-[10px] font-medium uppercase tracking-[0.24em] text-slate-500 sm:text-xs">
-        Local Mode
+        Room Preview
       </p>
       <h2 className="mt-1 text-lg font-semibold text-white sm:text-xl">
-        Shared seed practice board
+        {categoryLabel} board
       </h2>
       <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-300">
-        Keep using the original seed link flow for casual local games, or create a room above when you want one host-controlled board with two players and spectator support.
+        This preview shows the board shape the room will use. Once the host creates the room, everyone joining that code will see the same board.
       </p>
+      <div className="mt-4 grid gap-3 md:grid-cols-2">
+        <StatCard label="Category" value={categoryLabel} />
+        <StatCard label="Board Size" value={`${boardSize} Characters`} />
+      </div>
     </section>
   );
 }
@@ -993,13 +1029,11 @@ function StatCard({ label, value }: { label: string; value: string }) {
   );
 }
 
-function resolveLocalState(
-  currentState: GuessWhoLocalState,
-  fallbackState: GuessWhoLocalState,
+function resolvePrivateState(
+  currentState: GuessWhoPrivateState,
+  fallbackState: GuessWhoPrivateState,
 ) {
-  return currentState.boardKey === fallbackState.boardKey
-    ? currentState
-    : fallbackState;
+  return currentState.boardKey === fallbackState.boardKey ? currentState : fallbackState;
 }
 
 async function postRoomAction(url: string, body: Record<string, unknown>) {
