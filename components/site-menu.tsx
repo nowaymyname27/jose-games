@@ -25,6 +25,10 @@ const GAMES = [
     href: "/blind-rank",
     label: "Blind Rank",
   },
+  {
+    href: "/wavelength",
+    label: "Wavelength",
+  },
 ];
 
 export default function SiteMenu() {

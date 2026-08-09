@@ -242,11 +242,14 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
           room={activeRoom}
           categoryLabel={category.label}
           currentUserName={currentUser?.name ?? displayName}
+          displayName={displayName}
           isHost={isHost}
           isSpectator={isSpectator}
           playerCount={playerCount}
           spectatorCount={spectatorCount}
           copyStatus={roomCopyStatus}
+          onDisplayNameChange={setDisplayName}
+          onSaveName={() => void handleSaveName()}
           onCopyInvite={() => void handleCopyRoomLink()}
           onLeaveRoom={handleLeaveRoom}
           onCloseRoom={isHost ? () => void handleCloseRoom() : undefined}
@@ -512,6 +515,27 @@ export default function GuessWhoGame({ catalog, backendConfigured }: GuessWhoGam
     }
   }
 
+  async function handleSaveName() {
+    if (!roomCode) {
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+      setStatusMessage(null);
+      const nextRoom = await joinRoomWithResolvedName(roomCode, sessionId, displayName, {
+        onResolvedName: setDisplayName,
+      });
+
+      setRoom(nextRoom);
+      setError(null);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save display name.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleCopyRoomLink() {
     if (!roomCode) {
       return;
@@ -733,11 +757,14 @@ function RoomSummaryCard({
   room,
   categoryLabel,
   currentUserName,
+  displayName,
   isHost,
   isSpectator,
   playerCount,
   spectatorCount,
   copyStatus,
+  onDisplayNameChange,
+  onSaveName,
   onCopyInvite,
   onLeaveRoom,
   onCloseRoom,
@@ -746,11 +773,14 @@ function RoomSummaryCard({
   room: GuessWhoRoom;
   categoryLabel: string;
   currentUserName: string;
+  displayName: string;
   isHost: boolean;
   isSpectator: boolean;
   playerCount: number;
   spectatorCount: number;
   copyStatus: string | null;
+  onDisplayNameChange: (value: string) => void;
+  onSaveName: () => void;
   onCopyInvite: () => void;
   onLeaveRoom: () => void;
   onCloseRoom?: () => void;
@@ -802,6 +832,26 @@ function RoomSummaryCard({
         <StatCard label="Players" value={`${playerCount}/2`} />
         <StatCard label="Spectators" value={String(spectatorCount)} />
         <StatCard label="Name" value={currentUserName} />
+      </div>
+
+      <div className="mt-5 flex flex-col gap-3 rounded-[1rem] border border-white/8 bg-slate-950/35 p-4 md:flex-row md:items-end">
+        <label className="block flex-1 text-sm text-slate-300">
+          Display name
+          <input
+            value={displayName}
+            onChange={(event) => onDisplayNameChange(event.target.value)}
+            placeholder="Player 1"
+            className="mt-2 w-full rounded-2xl border border-white/10 bg-slate-950/80 px-4 py-3 text-base text-white outline-none transition placeholder:text-slate-500 focus:border-red-400/40"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={onSaveName}
+          disabled={submitting}
+          className="rounded-full bg-red-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-red-600 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          Save Name
+        </button>
       </div>
 
       {copyStatus ? <p className="mt-3 text-sm text-red-100">{copyStatus}</p> : null}
