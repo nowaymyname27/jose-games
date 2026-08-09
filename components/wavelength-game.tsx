@@ -319,20 +319,24 @@ export default function WavelengthGame({ backendConfigured }: WavelengthGameProp
         ) : null}
       </section>
 
-      <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.9fr)]">
-        <div className="order-1 xl:order-2">
-          <ScoreboardCard room={activeRoom} sessionId={sessionId} />
-        </div>
+      {roomState.status === "setup" || !currentRound ? (
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1.45fr)_minmax(340px,0.9fr)]">
+          <div className="order-1 xl:order-2">
+            <ScoreboardCard room={activeRoom} sessionId={sessionId} />
+          </div>
 
-        <section className="order-2 rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-6 xl:order-1">
-          {roomState.status === "setup" || !currentRound ? (
+          <section className="order-2 rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-6 xl:order-1">
             <SetupPanel
               isHost={isHost}
               playerCount={roomState.players.length}
               submitting={submitting}
               onStart={() => void handleStartRoom()}
             />
-          ) : (
+          </section>
+        </div>
+      ) : (
+        <div className="space-y-4">
+          <section className="rounded-[1.5rem] border border-white/10 bg-white/5 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.03)] sm:p-6">
             <RoundPanel
               key={`${currentRound.roundNumber}-${currentRound.phase}`}
               room={activeRoom}
@@ -345,9 +349,11 @@ export default function WavelengthGame({ backendConfigured }: WavelengthGameProp
               onSubmitGuess={(value) => void handleSubmitGuess(value)}
               onToggleReadyForNextRound={() => void handleToggleReadyForNextRound()}
             />
-          )}
-        </section>
-      </div>
+          </section>
+
+          <ScoreboardCard room={activeRoom} sessionId={sessionId} />
+        </div>
+      )}
 
       {currentRound?.phase === "revealed" ? (
         <RevealResultsCard room={activeRoom} />
