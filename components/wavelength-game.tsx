@@ -29,6 +29,15 @@ type ApiRoomResponse = {
   success?: boolean;
 };
 
+type PlayerGuessMarker = {
+  sessionId: string;
+  name: string;
+  position: number;
+  colorClasses: {
+    dot: string;
+  };
+};
+
 export default function WavelengthGame({ backendConfigured }: WavelengthGameProps) {
   const router = useRouter();
   const pathname = usePathname();
@@ -641,6 +650,16 @@ function RoundPanel({
   const readyPlayers = room.state.players.filter((player) =>
     round.readyForNextRoundSessionIds.includes(player.sessionId),
   );
+  const revealMarkers = round.phase === "revealed"
+    ? getRoundResults(room.state)
+        .filter((result) => result.guess.position !== null)
+        .map((result) => ({
+          sessionId: result.player.sessionId,
+          name: result.player.name,
+          position: result.guess.position as number,
+          colorClasses: getWavelengthPlayerColorClasses(room.state.players, result.player.sessionId),
+        }))
+    : [];
 
   return (
     <div className="space-y-5">
@@ -666,10 +685,11 @@ function RoundPanel({
         targetPosition={round.targetPosition}
         scoreZones={round.scoreZones}
         guessPosition={viewerGuessPosition ?? guessDraft}
-        showTarget={Boolean(isClueGiver || round.phase === "revealed")}
+        showTarget={Boolean(isClueGiver && round.phase !== "revealed")}
         showScoreZones={Boolean(isClueGiver || round.phase === "revealed")}
-        showGuess={Boolean(!isClueGiver && ["guessing", "revealed"].includes(round.phase))}
+        showGuess={Boolean(!isClueGiver && round.phase === "guessing")}
         interactiveGuess={round.phase === "guessing" && !isClueGiver}
+        revealMarkers={revealMarkers}
         onGuessChange={setGuessDraft}
       />
 
@@ -856,6 +876,7 @@ function SpectrumBar({
   showScoreZones,
   showGuess,
   interactiveGuess,
+  revealMarkers,
   onGuessChange,
 }: {
   leftLabel: string;
@@ -871,13 +892,14 @@ function SpectrumBar({
   showScoreZones: boolean;
   showGuess: boolean;
   interactiveGuess: boolean;
+  revealMarkers: PlayerGuessMarker[];
   onGuessChange: (value: number) => void;
 }) {
   return (
     <div className="rounded-[1.25rem] border border-fuchsia-300/12 bg-fuchsia-500/5 p-4 sm:p-5">
-      <div className="relative mx-auto w-full max-w-[720px]">
-        <div className="relative rounded-[1.25rem] border border-fuchsia-300/20 bg-slate-950/55 px-5 py-6">
-          <div className="relative h-14 overflow-hidden rounded-full border border-white/10 bg-linear-to-r from-[#301239] via-[#18101f] to-[#0f1f2f]">
+      <div className="relative w-full">
+        <div className="relative rounded-[1.25rem] border border-fuchsia-300/20 bg-slate-950/55 px-3 py-6 sm:px-4 sm:py-7">
+          <div className="relative h-24 overflow-hidden rounded-full border border-white/10 bg-linear-to-r from-[#301239] via-[#18101f] to-[#0f1f2f]">
             {showScoreZones
               ? [...scoreZones]
                   .sort((left, right) => left.points - right.points)
@@ -910,6 +932,17 @@ function SpectrumBar({
               />
             ) : null}
           </div>
+          <div className="pointer-events-none absolute inset-x-3 top-6 h-24 sm:inset-x-4 sm:top-7">
+            {getRevealMarkerLayout(revealMarkers).map((marker) => (
+              <SpectrumGuessDot
+                key={marker.sessionId}
+                position={marker.position}
+                colorClass={marker.colorClasses.dot}
+                label={marker.name}
+                verticalOffsetPx={marker.verticalOffsetPx}
+              />
+            ))}
+          </div>
         </div>
         <div className="mt-4 flex items-center justify-between gap-3 text-sm font-medium text-slate-300">
           <span>{leftLabel}</span>
@@ -940,6 +973,54 @@ function SpectrumBar({
   );
 }
 
+function SpectrumGuessDot({
+  position,
+  colorClass,
+  label,
+  verticalOffsetPx,
+}: {
+  position: number;
+  colorClass: string;
+  label: string;
+  verticalOffsetPx: number;
+}) {
+  const [tooltipOpen, setTooltipOpen] = useState(false);
+
+  return (
+    <button
+      type="button"
+      className="group pointer-events-auto absolute top-1/2 z-20 -translate-x-1/2 -translate-y-1/2 outline-none"
+      style={{
+        left: `${position}%`,
+        marginTop: `${verticalOffsetPx}px`,
+      }}
+      aria-label={label}
+      aria-expanded={tooltipOpen}
+      onClick={() => setTooltipOpen((open) => !open)}
+      onFocus={() => setTooltipOpen(true)}
+      onBlur={() => setTooltipOpen(false)}
+      onMouseEnter={() => setTooltipOpen(true)}
+      onMouseLeave={() => setTooltipOpen(false)}
+    >
+      <span
+        className={`pointer-events-none absolute bottom-full left-1/2 mb-2 -translate-x-1/2 whitespace-nowrap rounded-full border border-white/10 bg-slate-950/95 px-2 py-1 text-[10px] font-semibold tracking-[0.08em] text-slate-100 shadow-lg transition ${
+          tooltipOpen ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        {label}
+      </span>
+      <span
+        className={`pointer-events-none absolute bottom-full left-1/2 mb-0.5 h-2 w-2 -translate-x-1/2 rotate-45 border-b border-r border-white/10 bg-slate-950/95 transition ${
+          tooltipOpen ? "opacity-100" : "opacity-0"
+        }`}
+      />
+      <span
+        className={`block h-4 w-4 rounded-full border-2 border-slate-950 shadow-[0_0_0_1px_rgba(255,255,255,0.18)] transition group-hover:scale-110 ${colorClass}`}
+      />
+    </button>
+  );
+}
+
 function SpectrumMarker({
   position,
   colorClass,
@@ -952,14 +1033,14 @@ function SpectrumMarker({
   label: string;
 }) {
   return (
-    <div
-      className="pointer-events-none absolute bottom-0 top-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
-      style={{ left: `${position}%` }}
-    >
+      <div
+        className="pointer-events-none absolute bottom-0 top-1/2 z-30 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center"
+        style={{ left: `${position}%` }}
+      >
       <span className="mb-2 rounded-full border border-white/10 bg-slate-950/85 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-100">
         {label}
       </span>
-      <div className={`h-14 w-1 rounded-full ${lineClassName}`} />
+      <div className={`h-24 w-1 rounded-full ${lineClassName}`} />
       <div className={`h-4 w-4 rounded-full border-2 border-slate-950 ${colorClass}`} />
     </div>
   );
@@ -998,33 +1079,34 @@ function ScoreboardCard({ room, sessionId }: { room: WavelengthRoom; sessionId: 
         Scoreboard
       </p>
       <div className="mt-4 space-y-3">
-        {scoreboard.map(({ player, score }) => (
-          <div
-            key={player.sessionId}
-            className={`rounded-[1rem] border px-4 py-3 ${
-              player.sessionId === sessionId
-                ? "border-fuchsia-300/30 bg-fuchsia-400/10"
-                : "border-white/8 bg-slate-950/35"
-            }`}
-          >
-            <div className="flex items-center justify-between gap-3">
-              <div className="flex flex-wrap items-center gap-2">
-                <p className="text-base font-semibold text-white">{player.name}</p>
-                {player.isHost ? (
-                  <span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-fuchsia-100">
-                    Host
-                  </span>
-                ) : null}
-                {player.sessionId === sessionId ? (
-                  <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-300">
-                    You
-                  </span>
-                ) : null}
+        {scoreboard.map(({ player, score }) => {
+          const colorClasses = getWavelengthPlayerColorClasses(room.state.players, player.sessionId);
+
+          return (
+            <div
+              key={player.sessionId}
+              className={`rounded-[1rem] border px-4 py-3 ${colorClasses.border} ${colorClasses.background}`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className={`h-3 w-3 rounded-full border border-white/20 ${colorClasses.dot}`} />
+                  <p className="text-base font-semibold text-white">{player.name}</p>
+                  {player.isHost ? (
+                    <span className="rounded-full border border-fuchsia-300/20 bg-fuchsia-300/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-fuchsia-100">
+                      Host
+                    </span>
+                  ) : null}
+                  {player.sessionId === sessionId ? (
+                    <span className="rounded-full border border-white/10 bg-white/8 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-300">
+                      You
+                    </span>
+                  ) : null}
+                </div>
+                <p className="text-2xl font-semibold text-white">{score}</p>
               </div>
-              <p className="text-2xl font-semibold text-white">{score}</p>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </section>
   );
@@ -1053,19 +1135,87 @@ function RevealResultsCard({ room }: { room: WavelengthRoom }) {
         </div>
       ) : null}
       <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-        {results.map(({ guess, player, distance }) => (
-          <div key={guess.sessionId} className="rounded-[1rem] border border-white/8 bg-slate-950/35 px-4 py-3">
-            <p className="text-base font-semibold text-white">{player.name}</p>
-            <p className="mt-2 text-sm text-slate-300">
-              Guess: {guess.position !== null ? getSpectrumPositionLabel(guess.position) : "-"}
-            </p>
-            <p className="mt-1 text-sm text-slate-300">Distance: {distance}</p>
-            <p className="mt-3 text-2xl font-semibold text-white">+{guess.points ?? 0}</p>
-          </div>
-        ))}
+        {results.map(({ guess, player, distance }) => {
+          const colorClasses = getWavelengthPlayerColorClasses(room.state.players, player.sessionId);
+
+          return (
+            <div key={guess.sessionId} className="rounded-[1rem] border border-white/8 bg-slate-950/35 px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className={`h-3 w-3 rounded-full border border-white/20 ${colorClasses.dot}`} />
+                <p className="text-base font-semibold text-white">{player.name}</p>
+              </div>
+              <p className="mt-2 text-sm text-slate-300">
+                Guess: {guess.position !== null ? getSpectrumPositionLabel(guess.position) : "-"}
+              </p>
+              <p className="mt-1 text-sm text-slate-300">Distance: {distance}</p>
+              <p className="mt-3 text-2xl font-semibold text-white">+{guess.points ?? 0}</p>
+            </div>
+          );
+        })}
       </div>
     </section>
   );
+}
+
+const WAVELENGTH_PLAYER_COLOR_PALETTE = [
+  {
+    dot: "bg-cyan-300",
+    border: "border-cyan-300/45",
+    background: "bg-cyan-300/8",
+  },
+  {
+    dot: "bg-amber-300",
+    border: "border-amber-300/45",
+    background: "bg-amber-300/8",
+  },
+  {
+    dot: "bg-rose-300",
+    border: "border-rose-300/45",
+    background: "bg-rose-300/8",
+  },
+  {
+    dot: "bg-violet-300",
+    border: "border-violet-300/45",
+    background: "bg-violet-300/8",
+  },
+  {
+    dot: "bg-lime-300",
+    border: "border-lime-300/45",
+    background: "bg-lime-300/8",
+  },
+  {
+    dot: "bg-sky-300",
+    border: "border-sky-300/45",
+    background: "bg-sky-300/8",
+  },
+] as const;
+
+function getWavelengthPlayerColorClasses(players: WavelengthRoom["state"]["players"], sessionId: string) {
+  const playerIndex = players.findIndex((player) => player.sessionId === sessionId);
+  return WAVELENGTH_PLAYER_COLOR_PALETTE[
+    playerIndex >= 0 ? playerIndex % WAVELENGTH_PLAYER_COLOR_PALETTE.length : 0
+  ];
+}
+
+function getRevealMarkerLayout(markers: PlayerGuessMarker[]) {
+  const markersByPosition = new Map<number, PlayerGuessMarker[]>();
+
+  for (const marker of markers) {
+    const existingMarkers = markersByPosition.get(marker.position) ?? [];
+    existingMarkers.push(marker);
+    markersByPosition.set(marker.position, existingMarkers);
+  }
+
+  return markers.flatMap((marker) => {
+    const collidingMarkers = markersByPosition.get(marker.position) ?? [marker];
+    const collisionIndex = collidingMarkers.findIndex((entry) => entry.sessionId === marker.sessionId);
+    const centerIndex = (collidingMarkers.length - 1) / 2;
+
+    return {
+      ...marker,
+      verticalOffsetPx: Math.round((collisionIndex - centerIndex) * 12),
+    };
+  });
 }
 
 function StatCard({ label, value }: { label: string; value: string }) {
